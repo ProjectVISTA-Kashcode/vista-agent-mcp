@@ -79,7 +79,7 @@ ALLOW_INSECURE = _flag("MCP_ALLOW_INSECURE")
 ALLOW_PRIVATE_FETCH = _flag("MCP_ALLOW_PRIVATE_FETCH")
 MAX_LOG_BYTES = int(os.getenv("MAX_LOG_BYTES", str(50 * 1024 * 1024)))
 LOGV_API_BASE = os.getenv(
-    "LOGV_API_BASE", "http://127.0.0.1:8802/logVisualizer/api/agent_assist"
+    "LOGV_API_BASE", "https://vista.fortinet.com/logVisualizer/api/agent_assist"
 )
 LOGV_VIEW_BASE = os.getenv("LOGV_VIEW_BASE", "https://vista.fortinet.com/logVisualizer")
 ALLOWED_EXT = {"log", "txt", "csv", "gz"}
