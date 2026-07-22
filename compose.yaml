@@ -1,0 +1,28 @@
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+    container_name: vista-agent-mcp
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro 
+    environment:
+      - TZ=America/Vancouver
+    networks:
+      - vista-int
+    command: uv run server.py
+    logging:
+      driver: loki
+      options:
+        loki-url: "http://192.168.1.113:3100/loki/api/v1/push"
+        mode: non-blocking
+ 
+networks:
+  vista-int:
+    name: vista-int
+    external: true 

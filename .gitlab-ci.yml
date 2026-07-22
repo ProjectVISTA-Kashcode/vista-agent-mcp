@@ -1,0 +1,25 @@
+stages:
+  - deploy
+
+deploy:
+  stage: deploy
+  only:
+    - release
+  script: |
+    TARGET_DIR="/home/dockge/vista-agent-mcp"
+    if [ ! -d "$TARGET_DIR" ]; then
+      echo "Directory $TARGET_DIR does not exist. Cloning repository...";
+      cd /home/dockge
+      git clone git@vista.fortinet.com:ProjectVISTA/vista-agent-mcp.git;
+    else
+      echo "Directory $TARGET_DIR already exists. No action taken.";
+    fi
+    cd $TARGET_DIR
+    echo "Now in directory: $(pwd)"
+    git config --global --add safe.directory /home/dockge/vista-agent-mcp
+    git switch release
+    git pull --recurse-submodules
+    cp ../.secrets/vista-agent-mcp .env
+    docker compose build --no-cache
+    docker compose up -d
+  allow_failure: false
