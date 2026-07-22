@@ -1,0 +1,6 @@
+# Pin to the tested FastMCP major line — earlier 2.x lacks transport="http" and
+# StaticTokenVerifier at the imported path, so a fresh install must not resolve below it.
+fastmcp>=3.4,<4
+httpx>=0.27
+pydantic>=2
+python-dotenv>=1.0

@@ -1,0 +1,236 @@
+"""
+LogV analyzer — backs the `Log_Analyzer_Visualizer` MCP tool.
+=============================================================
+
+Forwards a FortiOS/FortiGate **event** log (+ optional question) to the Log
+Visualizer "AgentAssist" API and folds its structured JSON into ONE text block:
+
+    filter summary + provenance  →  Log Visualizer link  →  AI analysis  →  iframe URL
+
+Endpoint chosen by whether a question was asked:
+  * question given  → POST .../filter_analyze_visualyze_logs  (filter → analyze → visualize)
+  * no question     → POST .../analyze_visualise_logs         (analyze → visualize)
+
+AgentAssist itself classifies the log subtype (SD-WAN today) and returns a
+`supported: false` payload for types it can't handle yet — we surface that verbatim.
+
+The internal reasoning-engine name is scrubbed from all forwarded text (`_scrub`).
+"""
+from __future__ import annotations
+
+import re
+import time
+
+import httpx
+
+import vlog
+
+from .base import Analyzer
+
+# Max chars of the analysis section we place in the report (defense-in-depth: the backend
+# already bounds it, but never let a runaway response blow up the agent's context).
+MAX_ANALYSIS_CHARS = 40000
+
+# Words to remove from forwarded text (don't leak the internal model/vendor name);
+# matches DeepSeek / DeepSeek's / DeepSeeks (with or without curly apostrophe).
+_SCRUB_RE = re.compile(r"\bdeepseek(?:['’]?s)?\b", re.IGNORECASE)
+
+
+def _scrub(text: str) -> str:
+    """Replace internal engine references with a neutral phrase."""
+    if not text:
+        return text or ""
+    out = _SCRUB_RE.sub("the analysis engine", text)
+    # tidy the common "the analysis engine made" → "Made" style double-ups
+    out = re.sub(r"\bthe analysis engine made\b", "made", out, flags=re.IGNORECASE)
+    return out
+
+
+TOOL_DESCRIPTION = (
+    "Analyze and visualize a FortiOS / FortiGate **event** log file (e.g. FortiGate "
+    "SD-WAN health-check / SLA logs; more FortiOS event types coming). The platform "
+    "supplies the log automatically via the injected `source_url` field — you do NOT "
+    "ask the user for the file and you do NOT fill `source_url`.\n\n"
+    "What it does: ingests the log, auto-detects its type, and returns a single report "
+    "combining (1) a filter summary of the logs most relevant to the user's question, "
+    "(2) a link to open the logs in the Log Visualizer, (3) an AI analysis written for a "
+    "Fortinet TAC engineer, and (4) a URL to an interactive dashboard you should embed "
+    "as an iframe in your answer.\n\n"
+    "When to use: the user uploaded a FortiGate/FortiOS event log and wants it explained, "
+    "triaged, searched, or visualized. Pass the user's ask in `question` (optional — omit "
+    "for a general analysis + visualization). If the log type isn't supported yet, the tool "
+    "says so explicitly."
+)
+
+
+class LogVAnalyzer(Analyzer):
+    name = "Log_Analyzer_Visualizer"
+    log_field = "source_url"
+
+    def __init__(self, api_base: str, view_base: str | None = None, timeout: float = 300.0):
+        # e.g. http://logv-host:8802/logVisualizer/api/agent_assist
+        self.api_base = api_base.rstrip("/")
+        # SPA base used to build the shareable/iframe links (passed to AgentAssist as spa_base)
+        self.view_base = (view_base or "").rstrip("/") or None
+        self.timeout = timeout
+
+    def description(self) -> str:
+        return TOOL_DESCRIPTION
+
+    async def analyze(self, *, log_bytes: bytes, filename: str, question: str) -> str:
+        q = (question or "").strip()
+        endpoint = "filter_analyze_visualyze_logs" if q else "analyze_visualise_logs"
+        url = f"{self.api_base}/{endpoint}"
+
+        data: dict[str, str] = {}
+        if q:
+            data["question"] = q
+        if self.view_base:
+            data["spa_base"] = self.view_base
+        files = {"file": (filename or "logfile.log", log_bytes, "text/plain")}
+
+        vlog.log(
+            f"forward → LogV: POST {url}  (question={'yes' if q else 'no'}, "
+            f"file={len(log_bytes):,}B, spa_base={self.view_base or '(default)'})"
+        )
+        t0 = time.time()
+        timeout = httpx.Timeout(connect=5.0, read=self.timeout, write=30.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, data=data, files=files)
+        except httpx.HTTPError as e:
+            vlog.log(f"forward: LogV UNREACHABLE ({url}): {e}", vlog.ERROR)
+            return f"⚠️ Could not reach the Log Analyzer backend ({url}): {e}"
+
+        vlog.log(f"forward: LogV responded HTTP {resp.status_code} in {time.time()-t0:.2f}s")
+        if resp.status_code >= 400:
+            # AgentAssist returns JSON {"error": "..."} on 4xx/5xx
+            detail = ""
+            try:
+                detail = resp.json().get("error", "")
+            except Exception:  # noqa: BLE001
+                detail = resp.text[:200]
+            vlog.log(f"forward: LogV error {resp.status_code}: {detail}", vlog.WARNING)
+            return f"⚠️ The Log Analyzer rejected the request (HTTP {resp.status_code}): {detail}"
+
+        try:
+            payload = resp.json()
+        except Exception:  # noqa: BLE001
+            vlog.log("forward: LogV returned non-JSON body", vlog.WARNING)
+            return f"⚠️ The Log Analyzer returned a non-JSON response: {resp.text[:200]}"
+
+        _log_payload_summary(payload)
+        report = _format_report(payload)
+        vlog.log(f"report: built {len(report):,}-char text report from LogV JSON")
+        return report
+
+
+# --------------------------------------------------------------------------- #
+# JSON → one concatenated text block
+# --------------------------------------------------------------------------- #
+
+def _log_payload_summary(data: dict) -> None:
+    """Log the salient fields of the LogV response so the terminal shows what came back."""
+    if data.get("supported") is False:
+        vlog.log(f"LogV: log_type='{data.get('log_type')}' → NOT SUPPORTED (routing message)", vlog.WARNING)
+        return
+    viz = data.get("visualization", {}) or {}
+    ana = data.get("analysis", {}) or {}
+    filt = data.get("filter") or {}
+    bits = [f"log_type={data.get('log_type')}", f"total_logs={data.get('total_logs')}"]
+    if filt:
+        bits.append(f"filter.matched={filt.get('matched_count')}/{filt.get('total_logs')}")
+        bits.append(f"filter.queries={filt.get('query_count')}")
+        if filt.get("fallback_used"):
+            bits.append("filter.fallback=yes")
+    if isinstance(ana, dict):
+        atext = ana.get("analysis") or ""
+        bits.append(f"analysis={len(atext):,}chars")
+        if ana.get("context_trimmed"):
+            bits.append(f"logs_sent_to_ai={ana.get('logs_sent_to_ai') or ana.get('logs_analyzed')}(trimmed)")
+    bits.append(f"session_id={viz.get('session_id')}")
+    bits.append(f"iframe={'yes' if viz.get('iframe_url') else 'no'}")
+    vlog.log("LogV result: " + "  ".join(bits))
+    vlog.log(f"LogV view_url: {viz.get('view_url')}")
+
+
+def _format_report(data: dict) -> str:
+    """Fold the AgentAssist JSON (filter/analyze/visualize or analyze/visualize, or a
+    not-supported payload) into a single agent-readable text report."""
+    # Not-supported routing (any non-SD-WAN log today)
+    if data.get("supported") is False:
+        lt = data.get("log_type", "unknown")
+        supported = ", ".join(data.get("supported_log_types", [])) or "none listed"
+        return (
+            f"⚠️ The uploaded log was classified as **{lt}**, which the Log Analyzer & "
+            f"Visualizer does not support yet. Supported log types: {supported}. "
+            "Ask the user to upload a supported FortiOS event log."
+        )
+
+    log_type = data.get("log_type", "unknown")
+    total = data.get("total_logs")
+    parts: list[str] = [
+        f"# 🔍 Log Analyzer & Visualizer — {log_type}"
+        + (f"  ·  {total:,} logs" if isinstance(total, int) else "")
+    ]
+
+    # 1) FILTER (present only when a question drove a filter step)
+    filt = data.get("filter")
+    if isinstance(filt, dict):
+        mc = filt.get("matched_count")
+        tl = filt.get("total_logs", total)
+        qc = filt.get("query_count", 0)
+        parts.append(
+            f"## Filter\n"
+            f"filter: matched **{mc:,}/{tl:,}** · quer{'y' if qc == 1 else 'ies'} {qc}"
+            if isinstance(mc, int) and isinstance(tl, int)
+            else "## Filter\n(filter step ran)"
+        )
+        prov = _scrub(filt.get("provenance", "") or "")
+        if prov:
+            parts.append(prov)
+
+    # 2) LINK to the Log Visualizer session (the exact session that was just created &
+    #    analyzed — opening it shows the fully-parsed logs + dashboard for this run).
+    viz = data.get("visualization", {}) or {}
+    view_url = viz.get("view_url")
+    if view_url:
+        parts.append(
+            "## View in Log Visualizer\n"
+            "Open this link to view the analyzed logs directly in Log Visualizer "
+            "(the exact session for this analysis):\n"
+            f"{view_url}"
+        )
+
+    # 3) ANALYSIS (the AI report markdown)
+    analysis_obj = data.get("analysis", {})
+    analysis_text = (
+        analysis_obj.get("analysis") if isinstance(analysis_obj, dict) else analysis_obj
+    )
+    if analysis_text:
+        note = ""
+        if isinstance(analysis_obj, dict) and analysis_obj.get("context_trimmed"):
+            # no-question analyze path doesn't set logs_sent_to_ai → fall back to logs_analyzed
+            sent = analysis_obj.get("logs_sent_to_ai") or analysis_obj.get("logs_analyzed")
+            if sent is not None:
+                note = f" _(analysis computed over {sent} logs that fit the context window)_\n\n"
+        atext = _scrub(str(analysis_text))
+        if len(atext) > MAX_ANALYSIS_CHARS:
+            atext = (
+                atext[:MAX_ANALYSIS_CHARS]
+                + f"\n\n…(analysis truncated at {MAX_ANALYSIS_CHARS:,} chars — open the "
+                "Log Visualizer link above for the full report)"
+            )
+        parts.append("## Analysis\n" + note + atext)
+
+    # 4) INTERACTIVE VISUALIZATION (iframe URL + render instruction to the agent)
+    iframe = viz.get("iframe_url")
+    if iframe:
+        parts.append(
+            "## Interactive Visualization\n"
+            "Render the following URL as an `<iframe>` in your answer so the user can see "
+            "the interactive dashboard (charts, filters, tables):\n"
+            f"{iframe}"
+        )
+
+    return "\n\n".join(parts)

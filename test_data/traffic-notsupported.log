@@ -1,0 +1,1 @@
+date=2025-01-14 time=12:00:00 type="traffic" subtype="forward" srcip=10.0.0.1 dstip=8.8.8.8 action="accept" service="DNS"
