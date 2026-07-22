@@ -32,7 +32,8 @@ call Log_Analyzer_Visualizer
     question:"..." }              2. LogVAnalyzer.analyze(bytes, question)         signed URL)
                                      ├─ question?  POST .../filter_analyze_visualyze_logs ──►  Log
                                      └─ no q?      POST .../analyze_visualise_logs        ──►  Visualizer
-                                  3. fold JSON → ONE text report  ◄───────── {filter, analysis, viz}
+                                  3. ask ORB for troubleshooting steps  ──────────────────►  ORB API
+                                  4. fold JSON + ORB → ONE text report  ◄──── {filter, analysis, viz}
         ◄──────────────────────── return report text
 ```
 
@@ -42,11 +43,16 @@ The report the agent receives concatenates, in order:
    (the internal engine name is scrubbed).
 2. **Open in Log Visualizer** — a shareable link to the parsed logs.
 3. **Analysis** — the AI report (written for a Fortinet TAC engineer).
-4. **Interactive Visualization** — an `iframe` URL the agent is told to embed in its answer.
+4. **ORB Suggestions** — troubleshooting steps directly relevant to the analysis. This layer sends
+   the analysis to the ORB "ask" API and inserts its answer here (between analysis and the iframe).
+   **Fail-open**: if ORB is disabled, unreachable, slow, or there's no real analysis, this section is
+   simply omitted and the rest of the report is unaffected.
+5. **Interactive Visualization** — an `iframe` URL the agent is told to embed in its answer.
 
-If a question is given, all four appear (filter → analyze → visualize). **With no question**,
-the Filter block is omitted (just analyze → visualize). If the uploaded log isn't a supported
-type, the tool returns a clear "not supported yet" message instead.
+If a question is given, the filter block appears (filter → analyze → visualize). **With no question**,
+the Filter block is omitted (just analyze → visualize). ORB Suggestions appear whenever there's a real
+analysis to troubleshoot. If the uploaded log isn't a supported type, the tool returns a clear
+"not supported yet" message instead.
 
 ### The one special input: the log URL
 Per the partner contract, **we never ask the user for the file** — the platform injects a
@@ -123,6 +129,10 @@ can reach the client at>`.)*
 | `MCP_LOG_LEVEL` | `INFO` | terminal flow-log verbosity (`DEBUG` previews the report text) |
 | `LOGV_API_BASE` | `http://127.0.0.1:8802/logVisualizer/api/agent_assist` | Log Visualizer AgentAssist base |
 | `LOGV_VIEW_BASE` | `https://vista.fortinet.com/logVisualizer` | SPA base for the returned session links/iframe |
+| `ORB_ENABLED` | `1` | set `0` to skip the ORB troubleshooting step (report is built without it) |
+| `ORB_ASK_URL` | `http://172.17.96.58:9345/orb/api/ask` | ORB "ask" API queried after the analysis for troubleshooting steps |
+| `ORB_USERNAME` | `logV_mcp_call` | `username` sent to ORB |
+| `ORB_TIMEOUT` | `180` | ORB request timeout (s) — ORB is deep-research and slow (~45–140 s); fail-open on timeout |
 
 Every tool call logs the full flow to the terminal with a correlation id:
 
@@ -189,8 +199,10 @@ They register the server, wire `source_url` to their signed-URL injector, and en
 | Scenario | Result |
 |---|---|
 | `list_tools` | 1 tool `Log_Analyzer_Visualizer`, inputs `source_url` (required) + `question` |
-| With question (SD-WAN) | filter block (matched N/total) + LogV link + analysis + iframe URL |
-| No question (SD-WAN) | LogV link + analysis + iframe URL (no filter block) |
+| With question (SD-WAN) | filter block (matched N/total) + LogV link + analysis + **ORB Suggestions** + iframe URL |
+| No question (SD-WAN) | LogV link + analysis + **ORB Suggestions** + iframe URL (no filter block) |
+| ORB Suggestions section | troubleshooting steps directly relevant to the findings, **added by this MCP layer between the analysis and the visualization** (fail-open) |
+| Response time | ~1–2 min (full analysis + ORB troubleshooting research); within the 300 s read timeout |
 | Non-SD-WAN log | "classified as `Traffic:forward`, not supported yet…" |
 | 14 MB log | streamed + processed (29,169 logs) |
 | Internal engine name | scrubbed (0 mentions in output) |

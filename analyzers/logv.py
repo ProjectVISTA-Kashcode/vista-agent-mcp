@@ -5,7 +5,8 @@ LogV analyzer — backs the `Log_Analyzer_Visualizer` MCP tool.
 Forwards a FortiOS/FortiGate **event** log (+ optional question) to the Log
 Visualizer "AgentAssist" API and folds its structured JSON into ONE text block:
 
-    filter summary + provenance  →  Log Visualizer link  →  AI analysis  →  iframe URL
+    filter summary + provenance  →  Log Visualizer link  →  AI analysis
+      →  ORB troubleshooting suggestions  →  iframe URL
 
 Endpoint chosen by whether a question was asked:
   * question given  → POST .../filter_analyze_visualyze_logs  (filter → analyze → visualize)
@@ -14,7 +15,13 @@ Endpoint chosen by whether a question was asked:
 AgentAssist itself classifies the log subtype (SD-WAN today) and returns a
 `supported: false` payload for types it can't handle yet — we surface that verbatim.
 
-The internal reasoning-engine name is scrubbed from all forwarded text (`_scrub`).
+ORB troubleshooting: LogV returns *only* the analysis; this MCP layer then asks the ORB
+"ask" API for remediation steps directly relevant to that analysis and slots ORB's answer
+into the report between the analysis and the visualization (see `_fetch_orb_suggestions`).
+It is fail-open — any ORB error is logged and skipped, never blocking the report.
+
+The internal reasoning-engine name is scrubbed from all forwarded text (`_scrub`) — including
+the analysis we send out to ORB.
 """
 from __future__ import annotations
 
@@ -46,6 +53,21 @@ def _scrub(text: str) -> str:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# ORB troubleshooting — this MCP layer asks the ORB "ask" API for remediation steps
+# directly relevant to the analysis LogV returned, and slots ORB's `answer` into the
+# report between the analysis and the visualization. Config is injected by server.py.
+# --------------------------------------------------------------------------- #
+ORB_TROUBLESHOOT_PROMPT = (
+    "How can I troubleshoot and only specify which is directly relevant to the issue"
+)
+# Report heading for the ORB block (matches the report's other `## `-style sections).
+ORB_SECTION_HEADING = "## ORB Suggestions"
+DEFAULT_ORB_ASK_URL = "http://172.17.96.58:9345/orb/api/ask"
+DEFAULT_ORB_USERNAME = "logV_mcp_call"
+DEFAULT_ORB_TIMEOUT = 180.0  # ORB is deep-research; it can take ~45-140s
+
+
 TOOL_DESCRIPTION = (
     "Analyze and visualize a FortiOS / FortiGate **event** log file (e.g. FortiGate "
     "SD-WAN health-check / SLA logs; more FortiOS event types coming). The platform "
@@ -54,8 +76,10 @@ TOOL_DESCRIPTION = (
     "What it does: ingests the log, auto-detects its type, and returns a single report "
     "combining (1) a filter summary of the logs most relevant to the user's question, "
     "(2) a link to open the logs in the Log Visualizer, (3) an AI analysis written for a "
-    "Fortinet TAC engineer, and (4) a URL to an interactive dashboard you should embed "
-    "as an iframe in your answer.\n\n"
+    "Fortinet TAC engineer followed by a 'ORB Suggestions' section with troubleshooting "
+    "steps directly relevant to the findings, and (4) a URL to an interactive dashboard you "
+    "should embed as an iframe in your answer. Note: it runs full analysis + troubleshooting "
+    "research, so it can take 1-2 minutes to respond.\n\n"
     "When to use: the user uploaded a FortiGate/FortiOS event log and wants it explained, "
     "triaged, searched, or visualized. Pass the user's ask in `question` (optional — omit "
     "for a general analysis + visualization). If the log type isn't supported yet, the tool "
@@ -67,15 +91,73 @@ class LogVAnalyzer(Analyzer):
     name = "Log_Analyzer_Visualizer"
     log_field = "source_url"
 
-    def __init__(self, api_base: str, view_base: str | None = None, timeout: float = 300.0):
+    def __init__(
+        self,
+        api_base: str,
+        view_base: str | None = None,
+        timeout: float = 300.0,
+        *,
+        orb_enabled: bool = True,
+        orb_url: str = DEFAULT_ORB_ASK_URL,
+        orb_username: str = DEFAULT_ORB_USERNAME,
+        orb_timeout: float = DEFAULT_ORB_TIMEOUT,
+    ):
         # e.g. http://logv-host:8802/logVisualizer/api/agent_assist
         self.api_base = api_base.rstrip("/")
         # SPA base used to build the shareable/iframe links (passed to AgentAssist as spa_base)
         self.view_base = (view_base or "").rstrip("/") or None
         self.timeout = timeout
+        # ORB troubleshooting (fail-open; see _fetch_orb_suggestions)
+        self.orb_enabled = orb_enabled
+        self.orb_url = orb_url
+        self.orb_username = orb_username
+        self.orb_timeout = orb_timeout
 
     def description(self) -> str:
         return TOOL_DESCRIPTION
+
+    async def _fetch_orb_suggestions(self, payload: dict) -> str | None:
+        """Ask the ORB API for troubleshooting steps directly relevant to the analysis in
+        `payload`, and return ORB's `answer` string only. Fail-open and log-type-agnostic:
+        returns None (never raises) when ORB is disabled, the payload has no real analysis
+        (empty / AI-unavailable / 'no relevant logs'), or ORB errors/empties — so the report
+        is never blocked by ORB. The analysis is scrubbed before it leaves the MCP boundary,
+        so the internal engine name is never sent to ORB."""
+        if not self.orb_enabled:
+            return None
+        obj = payload.get("analysis", {})
+        analysis_text = str((obj.get("analysis") if isinstance(obj, dict) else obj) or "").strip()
+        if (
+            not analysis_text
+            or analysis_text == "Failed to query AI model."
+            or analysis_text.lstrip().startswith("### No relevant logs")
+        ):
+            vlog.log("ORB: skipped (no real analysis to troubleshoot)")
+            return None
+
+        question = f"{_scrub(analysis_text)}\n\n{ORB_TROUBLESHOOT_PROMPT}"
+        vlog.log(
+            f"ORB: requesting troubleshooting suggestions ({len(question):,}-char question) "
+            f"→ {self.orb_url}"
+        )
+        t0 = time.time()
+        timeout = httpx.Timeout(connect=5.0, read=self.orb_timeout, write=30.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    self.orb_url,
+                    json={"question": question, "username": self.orb_username},
+                )
+            resp.raise_for_status()
+            answer = ((resp.json() or {}).get("answer") or "").strip()
+        except Exception as e:  # noqa: BLE001  — never let ORB break the report
+            vlog.log(f"ORB: suggestions unavailable ({type(e).__name__}: {e})", vlog.WARNING)
+            return None
+        if not answer:
+            vlog.log(f"ORB: returned an empty answer in {time.time() - t0:.1f}s", vlog.WARNING)
+            return None
+        vlog.log(f"ORB: received {len(answer):,} chars of suggestions in {time.time() - t0:.1f}s")
+        return _scrub(answer)
 
     async def analyze(self, *, log_bytes: bytes, filename: str, question: str) -> str:
         q = (question or "").strip()
@@ -120,7 +202,10 @@ class LogVAnalyzer(Analyzer):
             return f"⚠️ The Log Analyzer returned a non-JSON response: {resp.text[:200]}"
 
         _log_payload_summary(payload)
-        report = _format_report(payload)
+        # Ask ORB for troubleshooting steps relevant to this analysis (fail-open — None on any
+        # issue), then fold them into the report between the analysis and the visualization.
+        orb_suggestions = await self._fetch_orb_suggestions(payload)
+        report = _format_report(payload, orb_suggestions=orb_suggestions)
         vlog.log(f"report: built {len(report):,}-char text report from LogV JSON")
         return report
 
@@ -154,9 +239,10 @@ def _log_payload_summary(data: dict) -> None:
     vlog.log(f"LogV view_url: {viz.get('view_url')}")
 
 
-def _format_report(data: dict) -> str:
+def _format_report(data: dict, orb_suggestions: str | None = None) -> str:
     """Fold the AgentAssist JSON (filter/analyze/visualize or analyze/visualize, or a
-    not-supported payload) into a single agent-readable text report."""
+    not-supported payload) into a single agent-readable text report. `orb_suggestions`, when
+    present, is inserted as its own section between the AI analysis and the visualization."""
     # Not-supported routing (any non-SD-WAN log today)
     if data.get("supported") is False:
         lt = data.get("log_type", "unknown")
@@ -222,6 +308,11 @@ def _format_report(data: dict) -> str:
                 "Log Visualizer link above for the full report)"
             )
         parts.append("## Analysis\n" + note + atext)
+
+    # 3.5) ORB TROUBLESHOOTING SUGGESTIONS — added by this MCP layer, positioned AFTER the
+    #      analysis and BEFORE the visualization. Already scrubbed by _fetch_orb_suggestions.
+    if orb_suggestions:
+        parts.append(f"{ORB_SECTION_HEADING}\n{orb_suggestions}")
 
     # 4) INTERACTIVE VISUALIZATION (iframe URL + render instruction to the agent)
     iframe = viz.get("iframe_url")

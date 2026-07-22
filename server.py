@@ -84,6 +84,14 @@ LOGV_API_BASE = os.getenv(
 LOGV_VIEW_BASE = os.getenv("LOGV_VIEW_BASE", "https://vista.fortinet.com/logVisualizer")
 ALLOWED_EXT = {"log", "txt", "csv", "gz"}
 
+# ORB troubleshooting API — after the LogV analyzer gets the analysis, it asks ORB for
+# remediation steps relevant to it and folds them into the report (fail-open). Disable with
+# ORB_ENABLED=0.
+ORB_ENABLED = os.getenv("ORB_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+ORB_ASK_URL = os.getenv("ORB_ASK_URL", "https://vista.fortinet.com/orb/api/ask")
+ORB_USERNAME = os.getenv("ORB_USERNAME", "logV_mcp_call")
+ORB_TIMEOUT = float(os.getenv("ORB_TIMEOUT", "180"))  # ORB is deep-research; allow ~3 min
+
 # --------------------------------------------------------------------------- #
 # Auth — a pre-shared static bearer token. Fail CLOSED: refuse to start with an empty
 # or the built-in default token unless MCP_ALLOW_INSECURE=1 (the starter kit is explicit:
@@ -117,7 +125,14 @@ mcp = FastMCP(
 )
 
 # One analyzer instance per backend (add more below to expose more tools).
-LOGV = LogVAnalyzer(api_base=LOGV_API_BASE, view_base=LOGV_VIEW_BASE)
+LOGV = LogVAnalyzer(
+    api_base=LOGV_API_BASE,
+    view_base=LOGV_VIEW_BASE,
+    orb_enabled=ORB_ENABLED,
+    orb_url=ORB_ASK_URL,
+    orb_username=ORB_USERNAME,
+    orb_timeout=ORB_TIMEOUT,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +283,8 @@ if __name__ == "__main__":
     vlog.log(f"  private fetch     : {'ALLOWED (dev)' if ALLOW_PRIVATE_FETCH else 'blocked (SSRF guard)'}")
     vlog.log(f"  LOGV_API_BASE    : {LOGV_API_BASE}")
     vlog.log(f"  LOGV_VIEW_BASE   : {LOGV_VIEW_BASE}  (session links + iframe)")
+    vlog.log(f"  ORB troubleshoot : {'ON → ' + ORB_ASK_URL if ORB_ENABLED else 'OFF'}"
+             + (f'  (timeout {ORB_TIMEOUT:.0f}s)' if ORB_ENABLED else ''))
     vlog.log(f"  MAX_LOG_BYTES    : {MAX_LOG_BYTES:,}")
     vlog.log(f"  log level        : {os.getenv('MCP_LOG_LEVEL', 'INFO')}")
     if _weak_token and ALLOW_INSECURE:
