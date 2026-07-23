@@ -1,0 +1,19 @@
+# Dependencies to run the VISTA-MCP test client (client_test.py) — a subset of the server's.
+# Everything else the client uses (argparse, asyncio, http.server, socket, threading, os) is
+# in the Python standard library. httpx / mcp / pydantic are pulled in transitively by fastmcp;
+# the client does not import them directly, so they are not listed here.
+#
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements-client.txt
+#   source client.env && python client_test.py --file test_data/sdwan-small.log --question "..."
+#
+# Tested with: fastmcp 3.4.4, python-dotenv 1.2.2 (Python 3.12).
+
+# MCP client (Client + StreamableHttpTransport). Pin to the 3.x line — earlier 2.x lacks the
+# transport class at the imported path.
+fastmcp>=3.4,<4
+
+# Loads client.env / .env so MCP_URL + MCP_AUTH_TOKEN don't have to be exported by hand.
+# Optional at runtime (the client degrades gracefully if it's missing), but required to use
+# the .env files.
+python-dotenv>=1.0

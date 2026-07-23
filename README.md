@@ -44,7 +44,9 @@ The report the agent receives concatenates, in order:
 2. **Open in Log Visualizer** — a shareable link to the parsed logs.
 3. **Analysis** — the AI report (written for a Fortinet TAC engineer).
 4. **ORB Suggestions** — troubleshooting steps directly relevant to the analysis. This layer sends
-   the analysis to the ORB "ask" API and inserts its answer here (between analysis and the iframe).
+   the analysis + a fixed troubleshoot instruction + **the user's own question (when they asked one)**
+   to the ORB "ask" API, so the remediation targets what was actually asked, and inserts ORB's answer
+   here (between analysis and the iframe).
    **Fail-open**: if ORB is disabled, unreachable, slow, or there's no real analysis, this section is
    simply omitted and the rest of the report is unaffected.
 5. **Interactive Visualization** — an `iframe` URL the agent is told to embed in its answer.

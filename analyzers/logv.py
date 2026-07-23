@@ -61,6 +61,9 @@ def _scrub(text: str) -> str:
 ORB_TROUBLESHOOT_PROMPT = (
     "How can I troubleshoot and only specify which is directly relevant to the issue"
 )
+# The user's own question is appended directly BELOW the troubleshoot prompt (when they asked
+# one), so ORB targets its remediation at what the user actually wanted to know.
+ORB_USER_QUESTION_LABEL = "The user's original question about these logs:"
 # Report heading for the ORB block (matches the report's other `## `-style sections).
 ORB_SECTION_HEADING = "## ORB Suggestions"
 DEFAULT_ORB_ASK_URL = "http://172.17.96.58:9345/orb/api/ask"
@@ -116,13 +119,17 @@ class LogVAnalyzer(Analyzer):
     def description(self) -> str:
         return TOOL_DESCRIPTION
 
-    async def _fetch_orb_suggestions(self, payload: dict) -> str | None:
+    async def _fetch_orb_suggestions(self, payload: dict, user_question: str = "") -> str | None:
         """Ask the ORB API for troubleshooting steps directly relevant to the analysis in
-        `payload`, and return ORB's `answer` string only. Fail-open and log-type-agnostic:
-        returns None (never raises) when ORB is disabled, the payload has no real analysis
-        (empty / AI-unavailable / 'no relevant logs'), or ORB errors/empties — so the report
-        is never blocked by ORB. The analysis is scrubbed before it leaves the MCP boundary,
-        so the internal engine name is never sent to ORB."""
+        `payload`, and return ORB's `answer` string only. The question sent to ORB is:
+
+            <analysis>  +  ORB_TROUBLESHOOT_PROMPT  +  <the user's own question, if any>
+
+        so the remediation is aimed at what the user actually asked. Fail-open and
+        log-type-agnostic: returns None (never raises) when ORB is disabled, the payload has no
+        real analysis (empty / AI-unavailable / 'no relevant logs'), or ORB errors/empties — so
+        the report is never blocked by ORB. Everything is scrubbed before it leaves the MCP
+        boundary, so the internal engine name is never sent to ORB."""
         if not self.orb_enabled:
             return None
         obj = payload.get("analysis", {})
@@ -135,10 +142,14 @@ class LogVAnalyzer(Analyzer):
             vlog.log("ORB: skipped (no real analysis to troubleshoot)")
             return None
 
-        question = f"{_scrub(analysis_text)}\n\n{ORB_TROUBLESHOOT_PROMPT}"
+        parts = [_scrub(analysis_text), ORB_TROUBLESHOOT_PROMPT]
+        uq = _scrub((user_question or "").strip())
+        if uq:  # the user's own question goes directly below the troubleshoot instruction
+            parts.append(f"{ORB_USER_QUESTION_LABEL} {uq}")
+        question = "\n\n".join(parts)
         vlog.log(
-            f"ORB: requesting troubleshooting suggestions ({len(question):,}-char question) "
-            f"→ {self.orb_url}"
+            f"ORB: requesting troubleshooting suggestions ({len(question):,}-char question, "
+            f"user question={'yes: ' + uq[:80] if uq else 'none'}) → {self.orb_url}"
         )
         t0 = time.time()
         timeout = httpx.Timeout(connect=5.0, read=self.orb_timeout, write=30.0, pool=5.0)
@@ -202,9 +213,10 @@ class LogVAnalyzer(Analyzer):
             return f"⚠️ The Log Analyzer returned a non-JSON response: {resp.text[:200]}"
 
         _log_payload_summary(payload)
-        # Ask ORB for troubleshooting steps relevant to this analysis (fail-open — None on any
-        # issue), then fold them into the report between the analysis and the visualization.
-        orb_suggestions = await self._fetch_orb_suggestions(payload)
+        # Ask ORB for troubleshooting steps relevant to this analysis AND to the user's own
+        # question (fail-open — None on any issue), then fold them into the report between the
+        # analysis and the visualization.
+        orb_suggestions = await self._fetch_orb_suggestions(payload, user_question=q)
         report = _format_report(payload, orb_suggestions=orb_suggestions)
         vlog.log(f"report: built {len(report):,}-char text report from LogV JSON")
         return report
