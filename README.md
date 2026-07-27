@@ -128,6 +128,9 @@ can reach the client at>`.)*
 | `MCP_ALLOW_INSECURE` | _(off)_ | `1` permits the dev/empty token (local dev only) |
 | `MCP_ALLOW_PRIVATE_FETCH` | _(off)_ | `1` allows fetching private/loopback URLs (needed for the local test client; prod signed URLs are public) |
 | `MAX_LOG_BYTES` | `52428800` (50 MB) | streaming fetch cap for the injected log |
+| `MCP_FETCH_CA_BUNDLE` | _(unset)_ | PEM bundle of extra CAs to trust on outbound calls (internal PKI). Bad path ⇒ the server refuses to start |
+| `MCP_FETCH_INSECURE_TLS_HOSTS` | _(empty)_ | comma-separated hosts to skip TLS verification for — a scoped `curl -k`, for hosts whose cert name doesn't match |
+| `MCP_FETCH_INSECURE_TLS` | _(off)_ | `1` skips TLS verification for **every** host (blunt; prefer the host list) |
 | `MCP_LOG_LEVEL` | `INFO` | terminal flow-log verbosity (`DEBUG` previews the report text) |
 | `LOGV_API_BASE` | `http://127.0.0.1:8802/logVisualizer/api/agent_assist` | Log Visualizer AgentAssist base |
 | `LOGV_VIEW_BASE` | `https://vista.fortinet.com/logVisualizer` | SPA base for the returned session links/iframe |
@@ -166,6 +169,30 @@ link-local / reserved address** (e.g. cloud metadata, the internal LogV backend)
 signed URLs are public, so this is transparent; for the **local test client** (which serves the
 log on `127.0.0.1`) set `MCP_ALLOW_PRIVATE_FETCH=1`. Signed URLs are never logged (the query
 string is redacted) and are never echoed back in error messages.
+
+### TLS trust on outbound calls
+
+Every outbound call (log fetch, LogV forward, ORB ask) **verifies TLS**, exactly like `curl`
+without `-k`. A rejected certificate fails as `httpx.ConnectError` in ~0.1 s — before any HTTP
+request is sent — and the flow log names it:
+
+```
+✖ fetch failed (ConnectError, TLS certificate rejected) for https://sa-staging.corp.fortinet.com/…
+  ↳ TLS certificate rejected by 'sa-staging.corp.fortinet.com' (same failure as `curl` without `-k`). Fix one of: …
+```
+
+Two ways to accommodate an internal host, in order of preference:
+
+| Symptom (`curl` says…) | Fix |
+|---|---|
+| `unable to get local issuer certificate` — signed by an internal CA | `MCP_FETCH_CA_BUNDLE=/etc/ssl/certs/corp-ca.pem` (mount the PEM into the container) |
+| `no alternative certificate subject name matches target host name` — name/SAN mismatch. **No CA bundle can fix this** | `MCP_FETCH_INSECURE_TLS_HOSTS=sa-staging.corp.fortinet.com` |
+
+`MCP_FETCH_INSECURE_TLS_HOSTS` is a *scoped* `curl -k`: verification is skipped for those exact
+hostnames only, every other host stays fully verified, and each use logs a `WARNING`. A relaxed
+request may also only be **redirected to another relaxed host** — so an unverified hop can't
+hand the connection off to an arbitrary target. `MCP_FETCH_INSECURE_TLS=1` relaxes everything
+and should be a last resort.
 
 ---
 

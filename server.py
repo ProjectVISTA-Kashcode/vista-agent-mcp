@@ -34,6 +34,11 @@ Config (env; a .env file is auto-loaded if python-dotenv is installed):
     MCP_ALLOW_PRIVATE_FETCH  '1' to allow fetching private/loopback URLs (local testing only;
                              production signed URLs are public, so keep this off)
     MAX_LOG_BYTES            default 52428800 (50 MB) — streaming fetch cap
+    MCP_FETCH_CA_BUNDLE      PEM bundle of extra CAs to trust on outbound calls (internal PKI)
+    MCP_FETCH_INSECURE_TLS_HOSTS
+                             comma-separated hosts to skip TLS verification for (`curl -k`,
+                             scoped) — for internal hosts whose cert name doesn't match
+    MCP_FETCH_INSECURE_TLS   '1' to skip TLS verification for every host (blunt; prefer the list)
     MCP_LOG_LEVEL            default INFO (DEBUG previews the report text)
     LOGV_API_BASE            Log Visualizer AgentAssist base
                              default http://127.0.0.1:8802/logVisualizer/api/agent_assist
@@ -62,6 +67,7 @@ try:  # optional: auto-load a .env file if python-dotenv is present
 except Exception:  # noqa: BLE001
     pass
 
+import tlsconf
 import vlog
 from analyzers import LogVAnalyzer
 
@@ -162,8 +168,22 @@ def _assert_public_host(url: str) -> None:
             raise ValueError("refusing to fetch a non-public (internal) address")
 
 
-async def _guard_request(request: httpx.Request) -> None:
-    _assert_public_host(str(request.url))
+def _guard_request(relaxed_tls: bool):
+    """Build the per-hop request hook. Beyond the SSRF check, when this client runs with TLS
+    verification disabled it must stay on hosts we chose to relax — otherwise a redirect from
+    a relaxed staging host would silently carry the unverified connection to an arbitrary
+    target."""
+
+    async def hook(request: httpx.Request) -> None:
+        url = str(request.url)
+        _assert_public_host(url)
+        if relaxed_tls and not tlsconf.is_relaxed(url):
+            raise ValueError(
+                f"refusing to follow a redirect to '{tlsconf.host_of(url) or '?'}' with TLS "
+                f"verification disabled — add that host to MCP_FETCH_INSECURE_TLS_HOSTS if intended"
+            )
+
+    return hook
 
 
 # --------------------------------------------------------------------------- #
@@ -178,7 +198,10 @@ async def fetch_log(source_url: str) -> tuple[bytes, str]:
     chunks: list[bytes] = []
     total = 0
     async with httpx.AsyncClient(
-        timeout=timeout, follow_redirects=True, event_hooks={"request": [_guard_request]}
+        timeout=timeout,
+        follow_redirects=True,
+        verify=tlsconf.verify_for(source_url),
+        event_hooks={"request": [_guard_request(tlsconf.is_relaxed(source_url))]},
     ) as client:
         async with client.stream("GET", source_url) as resp:
             vlog.log(f"fetch: HTTP {resp.status_code} · content-type={resp.headers.get('content-type','?')}")
@@ -243,8 +266,23 @@ async def log_analyzer_visualizer(
         vlog.log(f"◀ TOOL CALL done (fetch error) in {time.time()-t0:.2f}s")
         return f"⚠️ Could not fetch the log (HTTP {e.response.status_code})."
     except Exception as e:  # noqa: BLE001  # connect/timeout/etc — type only, redacted URL
-        vlog.log(f"✖ fetch failed ({type(e).__name__}) for {vlog.redact_url(source_url)}", vlog.ERROR)
+        # A rejected certificate arrives as a bare ConnectError; name it, or the operator sees
+        # only "ConnectError" for what is really a trust-store problem with a one-line fix.
+        cert = tlsconf.is_cert_error(e)
+        vlog.log(
+            f"✖ fetch failed ({type(e).__name__}{', TLS certificate rejected' if cert else ''}) "
+            f"for {vlog.redact_url(source_url)}",
+            vlog.ERROR,
+        )
+        if cert:
+            vlog.log(f"  ↳ {tlsconf.cert_error_hint(source_url)}", vlog.ERROR)
         vlog.log(f"◀ TOOL CALL done (fetch error) in {time.time()-t0:.2f}s")
+        if cert:
+            return (
+                "⚠️ Could not fetch the log: the server's TLS certificate was rejected. "
+                "This is a server-side trust configuration issue, not a problem with the "
+                "request — the administrator needs to trust the issuing CA or allow this host."
+            )
         return f"⚠️ Could not fetch the log ({type(e).__name__})."
 
     # --- analyze (wrapped so a formatting/backend bug never escapes as a raw MCP error) ---
@@ -281,6 +319,7 @@ if __name__ == "__main__":
     vlog.log(f"  tools            : {LOGV.name}")
     vlog.log(f"  auth             : {'Bearer token (StaticTokenVerifier)' if auth else 'DISABLED ⚠️ (MCP_ALLOW_INSECURE)'}")
     vlog.log(f"  private fetch     : {'ALLOWED (dev)' if ALLOW_PRIVATE_FETCH else 'blocked (SSRF guard)'}")
+    vlog.log(f"  outbound TLS     : {tlsconf.describe()}")
     vlog.log(f"  LOGV_API_BASE    : {LOGV_API_BASE}")
     vlog.log(f"  LOGV_VIEW_BASE   : {LOGV_VIEW_BASE}  (session links + iframe)")
     vlog.log(f"  ORB troubleshoot : {'ON → ' + ORB_ASK_URL if ORB_ENABLED else 'OFF'}"

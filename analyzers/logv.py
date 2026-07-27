@@ -30,6 +30,7 @@ import time
 
 import httpx
 
+import tlsconf
 import vlog
 
 from .base import Analyzer
@@ -154,7 +155,9 @@ class LogVAnalyzer(Analyzer):
         t0 = time.time()
         timeout = httpx.Timeout(connect=5.0, read=self.orb_timeout, write=30.0, pool=5.0)
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout, verify=tlsconf.verify_for(self.orb_url)
+            ) as client:
                 resp = await client.post(
                     self.orb_url,
                     json={"question": question, "username": self.orb_username},
@@ -163,6 +166,8 @@ class LogVAnalyzer(Analyzer):
             answer = ((resp.json() or {}).get("answer") or "").strip()
         except Exception as e:  # noqa: BLE001  — never let ORB break the report
             vlog.log(f"ORB: suggestions unavailable ({type(e).__name__}: {e})", vlog.WARNING)
+            if tlsconf.is_cert_error(e):
+                vlog.log(f"ORB: ↳ {tlsconf.cert_error_hint(self.orb_url)}", vlog.WARNING)
             return None
         if not answer:
             vlog.log(f"ORB: returned an empty answer in {time.time() - t0:.1f}s", vlog.WARNING)
@@ -189,10 +194,17 @@ class LogVAnalyzer(Analyzer):
         t0 = time.time()
         timeout = httpx.Timeout(connect=5.0, read=self.timeout, write=30.0, pool=5.0)
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, verify=tlsconf.verify_for(url)) as client:
                 resp = await client.post(url, data=data, files=files)
         except httpx.HTTPError as e:
             vlog.log(f"forward: LogV UNREACHABLE ({url}): {e}", vlog.ERROR)
+            if tlsconf.is_cert_error(e):
+                vlog.log(f"forward: ↳ {tlsconf.cert_error_hint(url)}", vlog.ERROR)
+                return (
+                    "⚠️ Could not reach the Log Analyzer backend: its TLS certificate was "
+                    f"rejected ({url}). The administrator needs to trust the issuing CA or "
+                    "allow this host."
+                )
             return f"⚠️ Could not reach the Log Analyzer backend ({url}): {e}"
 
         vlog.log(f"forward: LogV responded HTTP {resp.status_code} in {time.time()-t0:.2f}s")
