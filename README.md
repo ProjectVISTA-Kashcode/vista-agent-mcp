@@ -9,11 +9,22 @@ file or return a visualization**. The agent reads each tool's description in `li
 the one whose purpose matches the task.
 
 **Today's tool** — `Log_Analyzer_Visualizer`, backed by the **Log Visualizer "AgentAssist" API**
-(FortiGate SD-WAN event logs). It follows a **proxy** pattern: fetch the platform-injected log,
-forward it (plus the user's question) to that tool's backend, and return **one text report**.
-Backend-backed tools like this share the MCP protocol, auth, log-fetch, and SSRF plumbing; tools
-that don't proxy a backend are added as plain MCP tool functions
-(see [docs/ADDING_ANALYZERS.md](docs/ADDING_ANALYZERS.md)).
+(FortiGate SD-WAN event logs). The client still sends a `source_url` (+ optional `question`) and
+gets back **one text report** — no client-visible change.
+
+> **Architecture (current):** each MCP tool is a thin entry point into a **config-driven
+> orchestrator**. It discovers a set of standard **analyzers**, lets **DeepSeek** pick which
+> optional ones fit the question, calls them **in parallel**, concatenates their reports, and
+> appends **ORB** troubleshooting — with **no per-analyzer code**. Adding capability is a config
+> edit. Full details:
+> - [docs/Architecture.md](docs/Architecture.md) — the whole design and flow
+> - [docs/analyzer_api.md](docs/analyzer_api.md) — the standard analyzer contract every analyzer follows
+> - [docs/how_to_add_analyzer.md](docs/how_to_add_analyzer.md) — add an analyzer or a whole new tool (config, no code)
+> - [docs/testing.md](docs/testing.md) — run & test locally, with commands
+> - **Flow GUI** at **`/gui`** — live n8n-style flow of every job + a TOOL_ENABLEMENT / routing-prompt editor
+>
+> *(The older `analyzers/` module and `docs/ADDING_ANALYZERS.md` describe the superseded
+> one-subclass-per-tool proxy pattern; the orchestrator replaced it.)*
 
 > Production URL: `https://vista.fortinet.com/mcp/` (the served MCP path is **`/mcp/`**).
 
@@ -68,16 +79,24 @@ promptly** (it expires in minutes), **streams** it (logs can be large; capped by
 
 ```
 VISTA-MCP/
-├── server.py                 # FastMCP server: /mcp route, bearer auth, log fetch, tool registration
-├── analyzers/
-│   ├── base.py               # Analyzer abstraction (one class == one MCP tool)
-│   └── logv.py               # LogVAnalyzer: forwards to AgentAssist, folds JSON → one text report
-├── client_test.py            # end-to-end MCP client (serves a log, list_tools, call_tool)
-├── test_data/                # sample SD-WAN logs (copied from the Log Visualizer repo)
-├── requirements.txt          # fastmcp, httpx, pydantic
-├── .env.example              # configuration reference
-├── docs/ADDING_ANALYZERS.md  # how to add a new VISTA analyzer as a tool
-└── starter_kit/              # the partner team's original example (reference, untouched)
+├── server.py                    # FastMCP server: /mcp route, bearer auth, log fetch → orchestrator; mounts /gui
+├── config/tool_enablement.json  # TOOL_ENABLEMENT — per-tool: description, routing_system_prompt, orb, analyzers[]
+├── orchestrator/                # the config-driven core (no per-analyzer code)
+│   ├── models.py                #   the standard contract + ToolConfig/AnalyzerRef/Decision/Job
+│   ├── tool_enablement.py       #   load/save the per-tool config (cached, hot-reload)
+│   ├── vfr.py                   #   VFR — passthrough today (real routing seam; see Architecture.md §9)
+│   ├── discovery.py             #   GET /discover for all analyzers (concurrent, fail-soft)
+│   ├── deepseek.py · decide.py  #   DeepSeek routing + skip-logic + per-tool prompt composition
+│   ├── analyzer_client.py       #   the ONE generic call → AnalyzerResult
+│   ├── orb.py · pipeline.py     #   ORB (fail-open) + the whole flow wired together
+│   └── jobs.py · gui.py         #   job/flow registry (CLI logs) + the /gui routes
+├── gui/index.html               # the single-page n8n-style flow GUI (red/white)
+├── fakes/fake_analyzer.py       # a real analyzer following the contract, for local testing (+ run_fakes.sh)
+├── client_test.py               # end-to-end MCP client (serves a log, list_tools, call_tool)
+├── test_data/                   # sample SD-WAN logs
+├── docs/                        # Architecture.md · analyzer_api.md · how_to_add_analyzer.md · testing.md
+├── analyzers/                   # SUPERSEDED pre-orchestrator subclass pattern (kept for reference)
+└── starter_kit/                 # the partner team's original example (reference, untouched)
 ```
 
 ---

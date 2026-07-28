@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VISTA-MCP · Orchestrator Flow</title>
+<style>
+  /* ---- light (default) : red + white ---- */
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --panel2:#ffffff; --ink:#1b1f24; --muted:#6b7280;
+    --line:#e5e7eb; --line2:#eef0f3; --dot:#dcdfe4;
+    --red:#e11d2a; --red-dark:#b3121d; --red-soft:#fdeded; --red-tint:#fef4f4;
+    --ok:#128a4e; --ok-soft:#e7f6ee; --skip:#c77700; --skip-soft:#fdf3e3;
+    --err:#c81e1e; --err-soft:#fdecec; --pend:#9ca3af;
+    --mand:#b3121d; --field:#ffffff; --edgeline:#c6cbd3; --edgeidle:#dfe2e7;
+    --shadow:0 1px 3px rgba(20,20,30,.08),0 6px 18px rgba(20,20,30,.06);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  /* ---- dark ---- */
+  :root[data-theme="dark"]{
+    --bg:#0e1114; --panel:#161b21; --panel2:#1b2129; --ink:#e6edf3; --muted:#98a2ad;
+    --line:#2a313a; --line2:#222a32; --dot:#232a32;
+    --red:#f0323f; --red-dark:#c81e1e; --red-soft:rgba(240,50,63,.15); --red-tint:rgba(240,50,63,.07);
+    --ok:#3fb950; --ok-soft:rgba(63,185,80,.15); --skip:#e3b341; --skip-soft:rgba(227,179,65,.14);
+    --err:#f85149; --err-soft:rgba(248,81,73,.15); --pend:#6b7480;
+    --mand:#f0323f; --field:#0d1117; --edgeline:#3a434e; --edgeidle:#2a313a;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;overflow:hidden;transition:background .2s,color .2s}
+  a{color:var(--red)}
+  button{font-family:inherit;cursor:pointer}
+
+  header{height:56px;display:flex;align-items:center;gap:14px;padding:0 20px;background:var(--panel);
+    border-bottom:3px solid var(--red)}
+  header .brand{font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:10px;font-size:16px}
+  header .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-weight:900;font-size:13px;box-shadow:0 2px 6px rgba(225,29,42,.4)}
+  header .brand small{color:var(--muted);font-weight:600;font-size:12px}
+  header .spacer{flex:1}
+  .live{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+  .live .beat{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:beat 1.4s infinite}
+  @keyframes beat{0%,100%{opacity:.3}50%{opacity:1}}
+  header button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+    padding:8px 13px;font-size:13px;font-weight:600}
+  header button:hover{border-color:var(--red);color:var(--red)}
+  header button.primary{background:var(--red);color:#fff;border-color:var(--red)}
+  header button.primary:hover{background:var(--red-dark);color:#fff}
+  header button.icon{padding:8px 10px}
+
+  .tabbar{display:flex;align-items:center;gap:8px;padding:9px 20px;background:var(--panel);
+    border-bottom:1px solid var(--line);overflow-x:auto}
+  .tabbar .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    font-weight:700;margin-right:4px;white-space:nowrap}
+  .tab{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:6px 14px;font-size:13px;
+    font-weight:600;color:var(--ink);white-space:nowrap;display:flex;align-items:center;gap:7px;transition:all .12s}
+  .tab:hover{border-color:var(--red);color:var(--red)}
+  .tab.active{background:var(--red);color:#fff;border-color:var(--red);box-shadow:0 2px 8px rgba(225,29,42,.28)}
+  .tab .cnt{font-size:10.5px;background:var(--red-soft);color:var(--red);border-radius:999px;padding:0 6px;font-weight:700}
+  .tab.active .cnt{background:rgba(255,255,255,.25);color:#fff}
+  .tab.addtool{border-style:dashed;color:var(--muted)}
+
+  .wrap{display:flex;height:calc(100% - 56px - 47px)}
+  aside{width:326px;min-width:326px;border-right:1px solid var(--line);background:var(--panel);
+    display:flex;flex-direction:column}
+  aside .hd{padding:13px 16px;font-size:11.5px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+  aside .hd .n{background:var(--red-soft);color:var(--red);border-radius:999px;padding:1px 9px;font-size:11px}
+  .jobs{overflow:auto;flex:1}
+  .job{padding:12px 16px;border-bottom:1px solid var(--line2);cursor:pointer;transition:background .12s;
+    border-left:3px solid transparent}
+  .job:hover{background:var(--red-tint)}
+  .job.sel{background:var(--red-soft);border-left-color:var(--red)}
+  .job .row1{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .job .tool{font-weight:700;font-size:12.5px}
+  .job .q{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .job .row2{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11px;color:var(--muted)}
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px}
+  .chip.running{background:var(--red-soft);color:var(--red)}
+  .chip.done{background:var(--ok-soft);color:var(--ok)}
+  .chip.error{background:var(--err-soft);color:var(--err)}
+  .pill{font-family:var(--mono);font-size:10px;background:var(--field);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;color:var(--muted)}
+
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .detailbar{padding:13px 20px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;min-height:58px}
+  .detailbar .title{font-weight:700}
+  .detailbar .sub{color:var(--muted);font-size:12px;max-width:52ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .detailbar .metrics{margin-left:auto;display:flex;gap:18px;font-size:12px;color:var(--muted)}
+  .detailbar .metrics b{color:var(--ink);font-weight:700}
+
+  .canvas{flex:1;overflow:auto;position:relative;padding:44px 52px;background-color:var(--bg);
+    background-image:radial-gradient(var(--dot) 1.1px, transparent 1.1px);background-size:20px 20px}
+  #edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+  .flow{position:relative;display:flex;align-items:center;gap:66px;min-width:max-content;padding:14px 0 24px}
+  .col{display:flex;flex-direction:column;gap:24px;align-items:center;position:relative;z-index:2}
+  .node{width:196px;background:var(--panel2);border:1.5px solid var(--line);border-radius:13px;
+    padding:12px 14px;position:relative;box-shadow:var(--shadow);overflow:hidden}
+  .node .nhd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
+  .node .nhd .ico{font-size:15px}
+  .node .det{color:var(--muted);font-size:11.5px;margin-top:7px;line-height:1.45;max-height:52px;overflow:hidden;word-break:break-word}
+  .node .foot{display:flex;justify-content:space-between;align-items:center;margin-top:9px}
+  .node .st{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+  .node .ms{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .node .tag{position:absolute;top:8px;right:10px;font-size:9px;font-weight:800;padding:2px 7px;
+    border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
+  .tag.mand{background:var(--mand);color:#fff}
+  .tag.opt{background:var(--red-soft);color:var(--red);border:1px solid var(--red)}
+  .node .bar{position:absolute;left:0;top:0;bottom:0;width:5px}
+  .node.pending{opacity:.72}.node.pending .st{color:var(--pend)}.pending .bar{background:var(--pend)}
+  .node.running{border-color:var(--red);box-shadow:0 0 0 4px var(--red-soft),var(--shadow);animation:pulse 1.3s infinite}
+  .node.running .st{color:var(--red)}.running .bar{background:var(--red)}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px var(--red-soft),var(--shadow)}50%{box-shadow:0 0 0 7px var(--red-tint),var(--shadow)}}
+  .node.ok .st{color:var(--ok)}.ok .bar{background:var(--ok)}.node.ok{border-color:var(--ok)}
+  .node.skipped .st{color:var(--skip)}.skipped .bar{background:var(--skip)}.node.skipped{border-color:var(--skip)}
+  .node.error .st{color:var(--err)}.error .bar{background:var(--err)}.node.error{border-color:var(--err);background:var(--err-soft)}
+  .collabel{position:absolute;top:-26px;left:50%;transform:translateX(-50%);white-space:nowrap;
+    font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+
+  .events{height:154px;border-top:1px solid var(--line);background:var(--panel);overflow:auto;
+    font-family:var(--mono);font-size:11.5px;padding:10px 16px}
+  .events .ev{padding:2px 0;color:var(--muted);white-space:pre-wrap}
+  .events .ev .k{color:var(--red);font-weight:700}
+  .events .ev.error{color:var(--err)}.events .ev.ok{color:var(--ok)}.events .ev.skipped{color:var(--skip)}
+
+  .empty{color:var(--muted);padding:52px;text-align:center;font-size:13px;position:absolute;left:0;right:0}
+
+  .modal{position:fixed;inset:0;background:rgba(10,12,16,.5);display:none;align-items:center;
+    justify-content:center;z-index:50;backdrop-filter:blur(2px)}
+  .modal.show{display:flex}
+  .sheet{width:min(940px,95vw);max-height:92vh;overflow:auto;background:var(--panel);border-radius:16px;
+    padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  .sheet h2{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:9px}
+  .sheet h2 .logo{width:22px;height:22px;border-radius:6px;background:var(--red);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:900}
+  .sheet .hint{color:var(--muted);font-size:12.5px;margin-bottom:16px;line-height:1.5}
+  .tool-block{border:1px solid var(--line);border-radius:13px;padding:16px;margin-bottom:16px;background:var(--panel2);box-shadow:var(--shadow)}
+  .tool-block h3{margin:0 0 12px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+  .tool-block h3 .del{margin-left:auto}
+  label.f{display:block;font-size:11px;color:var(--muted);margin:11px 0 4px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .sheet input[type=text],.sheet textarea,.sheet input[type=number]{width:100%;background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:inherit;font-size:13px}
+  .sheet input:focus,.sheet textarea:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
+  .sheet textarea{resize:vertical;line-height:1.5}
+  .sheet textarea.mono{font-family:var(--mono);font-size:12px}
+  table.an{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+  table.an th{text-align:left;color:var(--muted);font-weight:700;font-size:10px;text-transform:uppercase;
+    padding:5px 6px;border-bottom:1px solid var(--line);letter-spacing:.3px}
+  table.an td{padding:4px 6px;border-bottom:1px solid var(--line2)}
+  table.an input[type=text],table.an input[type=number]{padding:6px 8px;font-size:12px}
+  table.an td.ctr{text-align:center}
+  .mini{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600}
+  .mini:hover{border-color:var(--red);color:var(--red)}
+  .mini.danger:hover{border-color:var(--err);color:var(--err)}
+  .sheet .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;position:sticky;bottom:-2px;
+    background:var(--panel);padding-top:14px;border-top:1px solid var(--line2)}
+  .btn-primary{background:var(--red);color:#fff;border:none;border-radius:9px;padding:10px 20px;font-weight:700}
+  .btn-primary:hover{background:var(--red-dark)}
+  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:10px 18px;font-weight:600}
+  .savemsg{font-size:12.5px;align-self:center;margin-right:auto;font-weight:600}
+  .savemsg.ok{color:var(--ok)}.savemsg.err{color:var(--err)}
+  .rawtoggle{color:var(--red);cursor:pointer;user-select:none;font-weight:700;white-space:nowrap}
+  #rawEditor{width:100%;min-height:340px}
+  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);font-weight:600}
+  .switch input{accent-color:var(--red)}
+
+  /* integrations dashboard */
+  .stat-row{display:flex;gap:14px;margin-bottom:16px}
+  .stat{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+  .stat .v{font-size:26px;font-weight:800;color:var(--red)}
+  .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-top:2px}
+  .intg{border:1px solid var(--line);border-radius:13px;margin-bottom:12px;overflow:hidden;background:var(--panel2)}
+  .intg .ih{padding:13px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line2)}
+  .intg .ih .name{font-weight:800}
+  .intg .ih .badges{margin-left:auto;display:flex;gap:6px}
+  .badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 9px;border-radius:999px}
+  .badge.on{background:var(--ok-soft);color:var(--ok)}.badge.off{background:var(--line2);color:var(--muted)}
+  .badge.cust{background:var(--red-soft);color:var(--red)}
+  .intg .idesc{padding:8px 16px 4px;color:var(--muted);font-size:12px;line-height:1.5}
+  .intg table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .intg table td{padding:7px 16px;border-top:1px solid var(--line2)}
+  .intg .aid{font-family:var(--mono);font-weight:700}
+  .intg .arole{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:999px}
+  .arole.mand{background:var(--mand);color:#fff}.arole.opt{background:var(--red-soft);color:var(--red)}
+  .arole.dis{background:var(--line2);color:var(--muted)}
+  .intg .aurl{color:var(--muted);font-family:var(--mono);font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">V</span>VISTA-MCP <small>· Orchestrator Flow</small></div>
+  <div class="live"><span class="beat"></span><span id="liveTxt">live</span></div>
+  <div class="spacer"></div>
+  <button id="themeBtn" class="icon" title="Toggle dark mode">🌙</button>
+  <button id="intgBtn">📦 Integrations</button>
+  <button id="pauseBtn">⏸ Pause</button>
+  <button id="cfgBtn" class="primary">⚙ Add / Edit Tools</button>
+</header>
+
+<div class="tabbar" id="tabbar"><span class="lbl">Tools</span></div>
+
+<div class="wrap">
+  <aside>
+    <div class="hd"><span>Live Jobs · last 30</span><span class="n" id="jobCount">0</span></div>
+    <div class="jobs" id="jobs"></div>
+  </aside>
+  <main>
+    <div class="detailbar">
+      <div>
+        <div class="title" id="dTitle">Select a tool or a job</div>
+        <div class="sub" id="dSub">Toggle a tool above to preview its flow; the flow animates live as jobs run.</div>
+      </div>
+      <div class="metrics" id="dMetrics"></div>
+    </div>
+    <div class="canvas" id="canvas">
+      <svg id="edges"></svg>
+      <div class="flow" id="flow"></div>
+      <div class="empty" id="emptyMsg">Pick a tool tab to preview its flow, or select a running job on the left.</div>
+    </div>
+    <div class="events" id="events"></div>
+  </main>
+</div>
+
+<!-- Config editor -->
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h2><span class="logo">⚙</span>TOOL_ENABLEMENT — add &amp; edit MCP tools</h2>
+    <div class="hint">This is the ONLY place tools, VISTA analyzers, and prompts are added or changed.
+      Each MCP tool has its analyzers (mandatory always run; optional ones are chosen by DeepSeek),
+      its ORB toggle, its client-facing <b>description</b>, and its own <b>routing system prompt</b> —
+      the custom DeepSeek prompt that decides which optional analyzers to call <i>for this tool</i>.
+      <b>+ add tool</b> creates a brand-new MCP tool (name + endpoints) with no code. Saving validates,
+      writes <span class="pill">config/tool_enablement.json</span>, and hot-reloads the live server.
+      <span class="rawtoggle" id="rawToggle">⟷ raw JSON</span></div>
+    <div id="formView"></div>
+    <div id="rawView" style="display:none"><textarea id="rawEditor" class="mono"></textarea></div>
+    <div class="actions">
+      <span class="savemsg" id="saveMsg"></span>
+      <button class="btn-ghost" id="cancelBtn">Cancel</button>
+      <button class="btn-primary" id="saveBtn">Save &amp; reload</button>
+    </div>
+  </div>
+</div>
+
+<!-- Integrations dashboard -->
+<div class="modal" id="intgModal">
+  <div class="sheet">
+    <h2><span class="logo">📦</span>Completed integrations</h2>
+    <div class="hint">Everything wired into VISTA-MCP right now — each MCP tool and the VISTA
+      analyzers integrated under it. This is a live view of the config; the orchestrator uses
+      exactly this.</div>
+    <div id="intgBody"></div>
+    <div class="actions">
+      <button class="btn-ghost" id="intgClose">Close</button>
+      <button class="btn-primary" id="intgEdit">Edit tools →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+// API base works whether the page is served at /gui or /mcp/gui (prod proxy).
+const API = (() => {
+  let p = location.pathname.replace(/\/+$/,'');   // strip trailing slash
+  p = p.replace(/\/gui$/,'');                      // drop the trailing /gui → mount prefix
+  return p + '/gui/api/';                          // → /gui/api/  or  /mcp/gui/api/
+})();
+const STATUS_LABEL = {pending:"pending",running:"running",ok:"done",skipped:"skipped",error:"error"};
+let STATE = {tools:{}, jobs:[]};
+let selectedJob = null, selectedTool = null, paused = false;
+
+// ---- theme ----
+(function initTheme(){
+  const saved = localStorage.getItem("vista-theme") || "light";
+  document.documentElement.setAttribute("data-theme", saved);
+})();
+$("#themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", cur);
+  localStorage.setItem("vista-theme", cur);
+  $("#themeBtn").textContent = cur === "dark" ? "☀️" : "🌙";
+  if(selectedJob) drawEdges(); else if(selectedTool) drawEdges();
+};
+$("#themeBtn").textContent = document.documentElement.getAttribute("data-theme") === "dark" ? "☀️" : "🌙";
+
+// ---- polling ----
+async function poll(){
+  if(paused) return;
+  try{
+    STATE = await (await fetch(API+"state?limit=30")).json();
+    renderTabs(); renderJobs();
+    if(selectedJob) await loadJob(selectedJob, true);
+    else if(selectedTool) renderTemplate(selectedTool);
+    $("#liveTxt").textContent = "live · " + new Date().toLocaleTimeString();
+  }catch(e){ $("#liveTxt").textContent = "reconnecting…"; }
+}
+setInterval(poll, 1500);
+
+// ---- tool tabs ----
+function renderTabs(){
+  const names = Object.keys(STATE.tools||{});
+  if(!selectedTool && !selectedJob && names.length) selectedTool = names[0];
+  const counts = {}; (STATE.jobs||[]).forEach(j=>counts[j.tool_name]=(counts[j.tool_name]||0)+1);
+  const bar = $("#tabbar");
+  bar.querySelectorAll(".tab").forEach(n=>n.remove());
+  names.forEach(n=>{
+    const t=document.createElement("button");
+    t.className="tab"+(n===selectedTool&&!selectedJob?" active":"");
+    t.innerHTML=`🧩 ${esc(n)}${counts[n]?`<span class="cnt">${counts[n]}</span>`:""}`;
+    t.onclick=()=>{ selectedTool=n; selectedJob=null; renderTemplate(n); renderTabs(); renderJobs(); };
+    bar.appendChild(t);
+  });
+  const add=document.createElement("button");
+  add.className="tab addtool"; add.textContent="＋ add tool"; add.onclick=()=>openConfig(true);
+  bar.appendChild(add);
+}
+
+// ---- jobs sidebar ----
+function renderJobs(){
+  const el=$("#jobs"), jobs=STATE.jobs||[];
+  $("#jobCount").textContent=jobs.length;
+  el.innerHTML = jobs.map(j=>{
+    const sel=j.job_id===selectedJob?" sel":"";
+    const sc=j.status==="running"?"running":(j.status==="error"?"error":"done");
+    const sa=(j.selected_analyzers||[]).join(", ");
+    return `<div class="job${sel}" data-id="${j.job_id}">
+      <div class="row1"><span class="chip ${sc}">${j.status}</span><span class="tool">${esc(j.tool_name)}</span></div>
+      <div class="q">${esc(j.question||"(no question)")}</div>
+      <div class="row2"><span class="pill">${j.job_id.slice(0,8)}</span>${sa?`<span>→ ${esc(sa)}</span>`:""}
+        <span style="margin-left:auto">${j.duration_s!=null?j.duration_s+"s":"…"}</span></div></div>`;
+  }).join("") || `<div class="empty" style="position:static;padding:32px">No jobs yet.<br>Run a tool call.</div>`;
+  el.querySelectorAll(".job").forEach(n=>n.onclick=()=>{selectedJob=n.dataset.id;selectedTool=null;loadJob(selectedJob);renderTabs();});
+}
+
+async function loadJob(id, quiet){
+  try{
+    const r=await fetch(API+"jobs/"+encodeURIComponent(id)); if(!r.ok) return;
+    const d=await r.json(); renderFlow(d.nodes,d.summary); renderEvents(d.events); renderJobs();
+  }catch(e){ if(!quiet) console.error(e); }
+}
+
+// ---- tool template (static shape) ----
+function renderTemplate(tool){
+  const t=STATE.tools[tool]; if(!t) return;
+  const nodes=[
+    N("intake","📥","Tool Call & Fetch","source_url (injected) + question → fetch log"),
+    N("vfr","🧭","VFR (routing)"),
+    N("tool_enablement","⚙️","Tool Enablement"),
+    N("discover","🔎","Discover Tools"),
+    N("decide","🧠","DeepSeek Decision", t.routing_system_prompt?clip(t.routing_system_prompt,120):""),
+  ];
+  (t.analyzers||[]).forEach(a=>nodes.push({...N("analyze:"+a.id,"📊","Analyzer · "+a.id),
+    parallel:true, tag:a.mandatory?"mand":"opt", detail:(a.enabled?"":"(disabled) ")+a.api_url}));
+  nodes.push(N("concat","🧩","Concatenate"));
+  if(t.orb_enabled) nodes.push(N("orb","🛟","ORB Suggestions"));
+  nodes.push(N("done","✅","Answer & Back"));
+  renderFlow(nodes,null);
+  $("#events").innerHTML=`<div class="ev">Template preview of <span class="k">${esc(tool)}</span> — `+
+    `mandatory analyzers always run; optional ones are chosen by this tool's DeepSeek routing prompt.</div>`;
+  $("#dTitle").textContent=tool+" · template";
+  $("#dSub").textContent=t.description?clip(t.description,120):"";
+  $("#dMetrics").innerHTML=`<span>analyzers <b>${(t.analyzers||[]).length}</b></span>`+
+    `<span>ORB <b>${t.orb_enabled?"on":"off"}</b></span>`+
+    `<span>routing prompt <b>${t.routing_system_prompt?"custom":"default"}</b></span>`;
+}
+function N(key,icon,label,detail){return {key,icon,label,status:"pending",detail:detail||"",elapsed_ms:null,parallel:false};}
+
+// ---- flow rendering ----
+function renderFlow(nodes,summary){
+  $("#emptyMsg").style.display=nodes.length?"none":"block";
+  if(summary){
+    $("#dTitle").textContent=summary.tool_name;
+    $("#dSub").textContent=summary.question||"(no question)";
+    const m=[`<span>status <b>${summary.status}</b></span>`];
+    if(summary.duration_s!=null)m.push(`<span>time <b>${summary.duration_s}s</b></span>`);
+    if(summary.selected_analyzers?.length)m.push(`<span>ran <b>${esc(summary.selected_analyzers.join(", "))}</b></span>`);
+    m.push(`<span>ORB <b>${summary.orb_enabled?"on":"off"}</b></span>`);
+    if(summary.report_chars)m.push(`<span>report <b>${summary.report_chars.toLocaleString()}</b> ch</span>`);
+    $("#dMetrics").innerHTML=m.join("");
+  }
+  const cols=[]; let i=0;
+  while(i<nodes.length){
+    if(nodes[i].parallel){const g=[];while(i<nodes.length&&nodes[i].parallel)g.push(nodes[i++]);cols.push({parallel:true,nodes:g});}
+    else cols.push({parallel:false,nodes:[nodes[i++]]});
+  }
+  $("#flow").innerHTML=cols.map(c=>{
+    const lbl=c.parallel?`<span class="collabel">parallel</span>`:"";
+    return `<div class="col">${lbl}${c.nodes.map(nodeHtml).join("")}</div>`;
+  }).join("");
+  requestAnimationFrame(drawEdges);
+}
+function nodeHtml(n){
+  const st=n.status||"pending";
+  const tag=n.tag?`<span class="tag ${n.tag}">${n.tag==="mand"?"mandatory":"optional"}</span>`:"";
+  const ms=n.elapsed_ms!=null?`${n.elapsed_ms}ms`:"";
+  return `<div class="node ${st}" data-key="${esc(n.key)}"><span class="bar"></span>${tag}
+    <div class="nhd"><span class="ico">${n.icon||"•"}</span>${esc(n.label)}</div>
+    ${n.detail?`<div class="det">${esc(clip(n.detail,150))}</div>`:""}
+    <div class="foot"><span class="st">${STATUS_LABEL[st]||st}</span><span class="ms">${ms}</span></div></div>`;
+}
+function drawEdges(){
+  const svg=$("#edges"),canvas=$("#canvas"),cr=canvas.getBoundingClientRect();
+  const ox=canvas.scrollLeft-cr.left, oy=canvas.scrollTop-cr.top;
+  const cols=[...$("#flow").querySelectorAll(".col")]; let paths="";
+  const cs=getComputedStyle(document.documentElement);
+  const RED=cs.getPropertyValue('--red').trim()||"#e11d2a", ERR=cs.getPropertyValue('--err').trim()||"#c81e1e";
+  const LINE=cs.getPropertyValue('--edgeline').trim()||"#c6cbd3", IDLE=cs.getPropertyValue('--edgeidle').trim()||"#dfe2e7";
+  for(let c=0;c<cols.length-1;c++){
+    const A=[...cols[c].querySelectorAll(".node")], B=[...cols[c+1].querySelectorAll(".node")];
+    A.forEach(a=>B.forEach(b=>{
+      const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+      const x1=ar.right+ox,y1=ar.top+oy+ar.height/2,x2=br.left+ox,y2=br.top+oy+br.height/2,mx=(x1+x2)/2;
+      const run=b.classList.contains("running"),err=b.classList.contains("error");
+      const done=b.classList.contains("ok")||b.classList.contains("skipped");
+      const col=run?RED:err?ERR:done?LINE:IDLE, w=run?2.6:1.6;
+      paths+=`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="${w}" ${run?'stroke-dasharray="5 5"':''}>`+
+        (run?`<animate attributeName="stroke-dashoffset" from="10" to="0" dur="0.55s" repeatCount="indefinite"/>`:"")+`</path>`;
+    }));
+  }
+  const fr=$("#flow").getBoundingClientRect();
+  svg.setAttribute("width",fr.width+140); svg.setAttribute("height",Math.max(fr.height+80,canvas.clientHeight));
+  svg.innerHTML=paths;
+}
+window.addEventListener("resize",drawEdges);
+$("#canvas").addEventListener("scroll",drawEdges);
+function renderEvents(events){
+  const el=$("#events");
+  el.innerHTML=(events||[]).map(e=>{
+    const ms=e.elapsed_ms!=null?` (${e.elapsed_ms}ms)`:"";
+    return `<div class="ev ${e.status}"><span class="k">[${esc(e.step)}]</span> ${esc(e.status)}${ms} ${esc(e.detail||"")}</div>`;
+  }).join(""); el.scrollTop=el.scrollHeight;
+}
+
+// ---- integrations dashboard ----
+$("#intgBtn").onclick=()=>{ renderIntegrations(); $("#intgModal").classList.add("show"); };
+$("#intgClose").onclick=()=>$("#intgModal").classList.remove("show");
+$("#intgEdit").onclick=()=>{ $("#intgModal").classList.remove("show"); openConfig(false); };
+function renderIntegrations(){
+  const tools=STATE.tools||{}; const names=Object.keys(tools);
+  let analyzers=0, orbOn=0;
+  names.forEach(n=>{ analyzers+=(tools[n].analyzers||[]).length; if(tools[n].orb_enabled) orbOn++; });
+  let html=`<div class="stat-row">
+    <div class="stat"><div class="v">${names.length}</div><div class="l">MCP tools</div></div>
+    <div class="stat"><div class="v">${analyzers}</div><div class="l">VISTA analyzers</div></div>
+    <div class="stat"><div class="v">${orbOn}</div><div class="l">with ORB</div></div>
+  </div>`;
+  html+=names.map(n=>{
+    const t=tools[n]; const ans=(t.analyzers||[]);
+    const rows=ans.map(a=>{
+      const role=!a.enabled?["dis","disabled"]:(a.mandatory?["mand","mandatory"]:["opt","optional"]);
+      return `<tr><td><span class="aid">${esc(a.id)}</span></td>
+        <td>${esc(a.title||"")}</td>
+        <td><span class="arole ${role[0]}">${role[1]}</span></td>
+        <td class="aurl">${esc(a.api_url||"")}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" style="color:var(--muted)">no analyzers yet</td></tr>`;
+    return `<div class="intg">
+      <div class="ih"><span>🧩</span><span class="name">${esc(n)}</span>
+        <span class="badges">
+          <span class="badge ${t.orb_enabled?'on':'off'}">ORB ${t.orb_enabled?'on':'off'}</span>
+          <span class="badge ${t.routing_system_prompt?'cust':'off'}">${t.routing_system_prompt?'custom prompt':'default prompt'}</span>
+          <span class="badge on">${ans.length} analyzer${ans.length===1?'':'s'}</span>
+        </span></div>
+      ${t.description?`<div class="idesc">${esc(clip(t.description,220))}</div>`:""}
+      <table><thead><tr><th></th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+  }).join("") || `<div class="empty" style="position:static">No tools integrated yet. Use “Add / Edit Tools”.</div>`;
+  $("#intgBody").innerHTML=html;
+}
+
+// ---- config editor ----
+let RAW=null, rawMode=false;
+function openConfig(focusAdd){
+  fetch(API+"config").then(r=>r.json()).then(cfg=>{
+    RAW=cfg; rawMode=false; $("#rawView").style.display="none"; $("#formView").style.display="block";
+    buildForm(); $("#saveMsg").textContent=""; $("#modal").classList.add("show");
+    if(focusAdd) setTimeout(()=>{const b=$("#addTool"); if(b) b.scrollIntoView({behavior:"smooth"});},50);
+  });
+}
+$("#cfgBtn").onclick=()=>openConfig(false);
+$("#cancelBtn").onclick=()=>$("#modal").classList.remove("show");
+$("#rawToggle").onclick=()=>{
+  if(!rawMode){ RAW=collectForm()||RAW; $("#rawEditor").value=JSON.stringify(RAW,null,2);
+    $("#rawView").style.display="block"; $("#formView").style.display="none"; rawMode=true; }
+  else{ try{RAW=JSON.parse($("#rawEditor").value);}catch(e){alert("Raw JSON invalid: "+e.message);return;}
+    buildForm(); $("#rawView").style.display="none"; $("#formView").style.display="block"; rawMode=false; }
+};
+function buildForm(){
+  const tools=RAW.tools||{};
+  $("#formView").innerHTML=Object.entries(tools).map(([name,t])=>toolBlock(name,t)).join("")+`<button class="mini" id="addTool">＋ add tool</button>`;
+  $("#formView").querySelectorAll("[data-add-an]").forEach(b=>b.onclick=()=>{
+    RAW=collectForm()||RAW; const tn=b.dataset.addAn; RAW.tools[tn].analyzers=RAW.tools[tn].analyzers||[];
+    RAW.tools[tn].analyzers.push({id:"new_analyzer",title:"",api_url:"http://127.0.0.1:PORT/base",discover_url:"",mandatory:false,enabled:true,timeout:120});
+    buildForm();
+  });
+  $("#formView").querySelectorAll("[data-del-an]").forEach(b=>b.onclick=()=>{
+    RAW=collectForm()||RAW; const [tn,idx]=b.dataset.delAn.split("|"); RAW.tools[tn].analyzers.splice(+idx,1); buildForm();
+  });
+  $("#formView").querySelectorAll("[data-del-tool]").forEach(b=>b.onclick=()=>{
+    if(!confirm("Remove tool '"+b.dataset.delTool+"'?"))return;
+    RAW=collectForm()||RAW; delete RAW.tools[b.dataset.delTool]; buildForm();
+  });
+  const at=$("#addTool"); if(at) at.onclick=()=>{
+    const nm=prompt("New MCP tool name (e.g. Config_Generator):"); if(!nm)return;
+    RAW=collectForm()||RAW; if(!RAW.tools)RAW.tools={};
+    RAW.tools[nm]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
+    buildForm(); setTimeout(()=>{const el=[...document.querySelectorAll(".tool-block")].pop(); el&&el.scrollIntoView({behavior:"smooth"});},40);
+  };
+}
+function toolBlock(name,t){
+  const ans=(t.analyzers||[]).map((a,i)=>`<tr>
+    <td><input type="text" data-an="${name}|${i}|id" value="${esc(a.id||"")}"></td>
+    <td><input type="text" data-an="${name}|${i}|title" value="${esc(a.title||"")}"></td>
+    <td><input type="text" data-an="${name}|${i}|api_url" value="${esc(a.api_url||"")}"></td>
+    <td class="ctr"><input type="checkbox" data-an="${name}|${i}|mandatory" ${a.mandatory?"checked":""}></td>
+    <td class="ctr"><input type="checkbox" data-an="${name}|${i}|enabled" ${a.enabled!==false?"checked":""}></td>
+    <td><input type="number" data-an="${name}|${i}|timeout" value="${a.timeout??120}" style="width:66px"></td>
+    <td class="ctr"><button class="mini danger" data-del-an="${name}|${i}">✕</button></td></tr>`).join("");
+  return `<div class="tool-block">
+    <h3>🧩 ${esc(name)}
+      <label class="switch" style="margin-left:auto"><input type="checkbox" data-tool="${name}|orb_enabled" ${t.orb_enabled?"checked":""}> ORB enabled</label>
+      <button class="mini danger del" data-del-tool="${name}">remove tool</button></h3>
+    <label class="f">Client-facing description (shown in list_tools)</label>
+    <textarea data-tool="${name}|description" rows="2">${esc(t.description||"")}</textarea>
+    <label class="f">Routing system prompt — this tool's custom DeepSeek analyzer-selection prompt</label>
+    <textarea data-tool="${name}|routing_system_prompt" rows="4" class="mono">${esc(t.routing_system_prompt||"")}</textarea>
+    <label class="f">Analyzers &nbsp;<span style="text-transform:none;letter-spacing:0;color:var(--muted)">(mandatory = always run · optional = DeepSeek decides)</span></label>
+    <table class="an"><thead><tr><th>id</th><th>title</th><th>api_url</th><th>mand.</th><th>enab.</th><th>timeout</th><th></th></tr></thead>
+      <tbody>${ans}</tbody></table>
+    <div style="margin-top:8px"><button class="mini" data-add-an="${name}">＋ add analyzer</button></div></div>`;
+}
+function collectForm(){
+  if(rawMode){ try{return JSON.parse($("#rawEditor").value);}catch(e){return null;} }
+  const out={tools:{}};
+  document.querySelectorAll("[data-tool]").forEach(inp=>{
+    const [tn,field]=inp.dataset.tool.split("|");
+    if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
+    out.tools[tn][field]=inp.type==="checkbox"?inp.checked:inp.value;
+  });
+  const byTool={};
+  document.querySelectorAll("[data-an]").forEach(inp=>{
+    const [tn,idx,field]=inp.dataset.an.split("|"); byTool[tn]=byTool[tn]||{}; byTool[tn][idx]=byTool[tn][idx]||{};
+    byTool[tn][idx][field]=inp.type==="checkbox"?inp.checked:(inp.type==="number"?(+inp.value||0):inp.value);
+  });
+  Object.entries(byTool).forEach(([tn,rows])=>{
+    if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
+    out.tools[tn].analyzers=Object.keys(rows).sort((a,b)=>a-b).map(k=>{const a=rows[k];a.discover_url=a.discover_url||"";return a;});
+  });
+  return out;
+}
+$("#saveBtn").onclick=async()=>{
+  const body=collectForm(); if(!body){ setSave("raw JSON is invalid","err"); return; }
+  setSave("saving…","");
+  try{
+    const r=await fetch(API+"config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.ok){ setSave("saved ✓ tools: "+d.tools.join(", "),"ok"); await poll(); setTimeout(()=>$("#modal").classList.remove("show"),800); }
+    else setSave("error: "+d.error,"err");
+  }catch(e){ setSave("network error: "+e.message,"err"); }
+};
+function setSave(m,c){const el=$("#saveMsg");el.textContent=m;el.className="savemsg "+(c||"");}
+
+$("#pauseBtn").onclick=()=>{ paused=!paused; $("#pauseBtn").textContent=paused?"▶ Resume":"⏸ Pause";
+  $("#liveTxt").textContent=paused?"paused":"live"; if(!paused) poll(); };
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function clip(s,n){s=String(s??"");return s.length>n?s.slice(0,n-1)+"…":s;}
+poll();
+</script>
+</body>
+</html>

@@ -47,9 +47,9 @@ Config (env; a .env file is auto-loaded if python-dotenv is installed):
 """
 from __future__ import annotations
 
-import inspect
 import ipaddress
 import os
+import re
 import socket
 import time
 from typing import Annotated
@@ -58,6 +58,7 @@ from urllib.parse import urlparse
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.auth import StaticTokenVerifier
+from fastmcp.tools import Tool
 from pydantic import Field
 
 try:  # optional: auto-load a .env file if python-dotenv is present
@@ -69,7 +70,7 @@ except Exception:  # noqa: BLE001
 
 import tlsconf
 import vlog
-from analyzers import LogVAnalyzer
+from orchestrator import gui, jobs, pipeline, tool_enablement
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -130,15 +131,30 @@ mcp = FastMCP(
     auth=auth,
 )
 
-# One analyzer instance per backend (add more below to expose more tools).
-LOGV = LogVAnalyzer(
-    api_base=LOGV_API_BASE,
-    view_base=LOGV_VIEW_BASE,
-    orb_enabled=ORB_ENABLED,
-    orb_url=ORB_ASK_URL,
-    orb_username=ORB_USERNAME,
-    orb_timeout=ORB_TIMEOUT,
+# --------------------------------------------------------------------------- #
+# MCP tools. Each tool maps to a TOOL_ENABLEMENT config (config/tool_enablement.json)
+# that lists the analyzers it may use + whether ORB runs at the end. Adding an analyzer
+# to a tool is a CONFIG edit — no code here. The tool function just fetches the injected
+# log and hands it to the orchestrator pipeline.
+# --------------------------------------------------------------------------- #
+TOOL_NAME = "Log_Analyzer_Visualizer"
+# Fallback description if the tool's config has none. The client-facing description is
+# config-driven (config/tool_enablement.json → tools.<name>.description) so it can be edited
+# per tool alongside its routing prompt and analyzers — see _tool_description().
+TOOL_DESCRIPTION = (
+    "Analyze and visualize a FortiOS/FortiGate (or FortiAnalyzer) log file. The platform "
+    "supplies the log automatically via the injected `source_url` field — you do NOT ask the "
+    "user for the file and you do NOT fill `source_url`. Pass the user's natural-language "
+    "question in `question` (optional). Returns one text report: the log analysis and an "
+    "interactive dashboard link, plus troubleshooting suggestions and any relevant companion "
+    "analyses. It auto-detects the log's event type and routes internally."
 )
+
+
+def _tool_description(tool_name: str, fallback: str) -> str:
+    """The client-facing description for a tool — from its config, else the code fallback."""
+    cfg = tool_enablement.get(tool_name)
+    return (cfg.description.strip() if cfg and cfg.description.strip() else fallback)
 
 
 # --------------------------------------------------------------------------- #
@@ -224,34 +240,31 @@ async def fetch_log(source_url: str) -> tuple[bytes, str]:
 
 
 # --------------------------------------------------------------------------- #
-# Tools  (one thin proxy function per analyzer)
+# Tools — registered DYNAMICALLY from TOOL_ENABLEMENT config (config/tool_enablement.json).
+#
+# Every VISTA tool shares the same MCP surface: it receives the platform-injected `source_url`
+# (+ optional `question`), fetches the log, and hands it to the orchestrator pipeline keyed by
+# the tool's name. So ONE generic function serves any tool, and adding a tool is a CONFIG edit
+# (via the GUI) — a new MCP tool + its endpoints appear with no code and no restart.
 # --------------------------------------------------------------------------- #
-async def log_analyzer_visualizer(
-    source_url: Annotated[
-        str,
-        Field(
-            description=(
-                "Signed URL to the uploaded FortiOS/FortiGate log. THE PLATFORM INJECTS "
-                "THIS automatically — the model must not fill or invent it."
-            )
-        ),
-    ],
-    question: Annotated[
-        str,
-        Field(
-            description=(
-                "The user's natural-language question about the log (e.g. 'SLA failures on "
-                "the Austin healthcheck between 12:09 and 12:11'). Optional — omit for a "
-                "general analysis + visualization."
-            )
-        ),
-    ] = "",
-) -> str:
-    vlog.new_rid()
+GENERIC_TOOL_DESCRIPTION = (
+    "A VISTA analysis tool. The platform supplies the input file automatically via the injected "
+    "`source_url` field — do NOT ask the user for the file and do NOT fill `source_url`. Pass the "
+    "user's natural-language question in `question` (optional). Returns one text report."
+)
+
+
+async def _run_tool(tool_name: str, source_url: str, question: str) -> str:
+    """Fetch the injected log and run the orchestrator pipeline for ``tool_name``.
+
+    Shared by every dynamically-registered tool — the tool's identity is just the ``tool_name``
+    passed to the pipeline, which loads that tool's analyzers/routing/ORB from config.
+    """
+    rid = vlog.new_rid()
     t0 = time.time()
-    vlog.log("─" * 70)
+    vlog.log("═" * 72)
     vlog.log(
-        f"▶ TOOL CALL  {LOGV.name}  question={vlog.short(question, 160)!r}  "
+        f"▶ TOOL CALL  {tool_name}  question={vlog.short(question, 160)!r}  "
         f"source_url={vlog.redact_url(source_url)}"
     )
     # --- fetch (leak-safe error handling: never echo the signed URL or a raw stack) ---
@@ -285,38 +298,104 @@ async def log_analyzer_visualizer(
             )
         return f"⚠️ Could not fetch the log ({type(e).__name__})."
 
-    # --- analyze (wrapped so a formatting/backend bug never escapes as a raw MCP error) ---
+    # --- orchestrate: VFR → TOOL_ENABLEMENT → discover → decide → call analyzers → ORB ---
+    # (wrapped so a pipeline bug never escapes as a raw MCP error; the pipeline itself is
+    # also fail-safe internally and always returns a string.)
     try:
-        report = await LOGV.analyze(log_bytes=log_bytes, filename=filename, question=question)
+        report = await pipeline.run(
+            tool_name=tool_name, file_bytes=log_bytes, filename=filename,
+            question=question, job_id=rid,
+        )
     except Exception as e:  # noqa: BLE001
-        vlog.log(f"✖ analyze failed: {type(e).__name__}: {e}", vlog.ERROR)
-        report = "⚠️ The Log Analyzer encountered an internal error while processing the log."
+        vlog.log(f"✖ pipeline failed: {type(e).__name__}: {e}", vlog.ERROR)
+        report = "⚠️ The analysis pipeline encountered an internal error while processing the log."
 
     vlog.log(f"◀ TOOL CALL done — returning {len(report):,}-char report in {time.time()-t0:.2f}s")
     vlog.log(f"report preview: {vlog.short(report, 400)}", vlog.DEBUG)
     return report
 
 
-def register(analyzer, fn) -> None:
-    """Register an analyzer's tool, asserting its declared `log_field` (the field the
-    platform injects the signed URL into) is actually a parameter of the tool function —
-    so `log_field` and the tool signature can't silently drift when adding analyzers."""
-    params = inspect.signature(fn).parameters
-    if analyzer.log_field not in params:
-        raise SystemExit(
-            f"{analyzer.name}: declared log_field '{analyzer.log_field}' is not a parameter "
-            f"of its tool function {list(params)} — fix the tool signature or log_field."
-        )
-    mcp.tool(name=analyzer.name, description=analyzer.description())(fn)
+def _make_tool_fn(tool_name: str):
+    """Build a typed MCP tool function bound to ``tool_name`` (all tools share this shape)."""
+    async def tool_fn(
+        source_url: Annotated[str, Field(description=(
+            "Signed URL to the uploaded FortiOS/FortiGate log. THE PLATFORM INJECTS THIS "
+            "automatically — the model must not fill or invent it."))],
+        question: Annotated[str, Field(description=(
+            "The user's natural-language question about the log (optional — omit for a general "
+            "analysis + visualization)."))] = "",
+    ) -> str:
+        return await _run_tool(tool_name, source_url, question)
+
+    tool_fn.__name__ = re.sub(r"\W", "_", tool_name).lower() or "vista_tool"
+    return tool_fn
 
 
-register(LOGV, log_analyzer_visualizer)
+# name -> currently-registered description, so sync can add / remove / refresh tools live.
+_REGISTERED: dict[str, str] = {}
+
+
+def _desc_for(tool_name: str, tc) -> str:
+    fallback = TOOL_DESCRIPTION if tool_name == TOOL_NAME else GENERIC_TOOL_DESCRIPTION
+    return (tc.description.strip() if tc and tc.description.strip() else fallback)
+
+
+def sync_tools(cfg: dict | None = None) -> None:
+    """Reconcile the live MCP tool set with TOOL_ENABLEMENT config.
+
+    Called once at startup and again after every GUI config save (via
+    ``tool_enablement.on_change``). Adding a tool in the GUI therefore exposes a real MCP tool
+    (name + endpoints) with **no restart and no code**; removing one unregisters it; editing a
+    tool's description refreshes it. (Analyzer/routing/ORB edits need no re-registration — the
+    pipeline reads them from config per call.)
+    """
+    cfg = cfg if cfg is not None else tool_enablement.load()
+    desired = {name: _desc_for(name, tc) for name, tc in cfg.items()}
+
+    for name, desc in desired.items():
+        if _REGISTERED.get(name) == desc:
+            continue
+        if name in _REGISTERED:                       # description changed → refresh
+            try:
+                mcp.remove_tool(name)
+            except Exception:  # noqa: BLE001
+                pass
+        mcp.add_tool(Tool.from_function(_make_tool_fn(name), name=name, description=desc))
+        _REGISTERED[name] = desc
+        vlog.log(f"  ⊕ tool registered: {name}")
+
+    for name in list(_REGISTERED):                    # dropped from config → unregister
+        if name not in desired:
+            try:
+                mcp.remove_tool(name)
+            except Exception:  # noqa: BLE001
+                pass
+            _REGISTERED.pop(name, None)
+            vlog.log(f"  ⊖ tool unregistered: {name}")
+
+
+# Register every configured tool now, and keep the live tool set in sync with GUI config edits.
+sync_tools()
+tool_enablement.on_change(sync_tools)
+
+# Flow GUI — an in-process operator console (live jobs + n8n-style flow + TOOL_ENABLEMENT editor),
+# served at BOTH /gui and /mcp/gui. Shares the in-memory job registry with the pipeline.
+gui.register(mcp)
 
 
 if __name__ == "__main__":
     vlog.log("=" * 70)
     vlog.log(f"VISTA-MCP starting → http://{HOST}:{PORT}/mcp/")
-    vlog.log(f"  tools            : {LOGV.name}")
+    vlog.log(f"  flow GUI         : http://{HOST}:{PORT}/gui   (also /mcp/gui behind the prod proxy)")
+    _all = tool_enablement.load()
+    vlog.log(f"  tools ({len(_all)})       : {', '.join(_all) or '(none)'}   [config-driven; add/edit via GUI]")
+    for _name, _cfg in _all.items():
+        vlog.log(f"  • {_name}:")
+        for _a in _cfg.analyzers:
+            vlog.log(f"      - {_a.id:<6} {'[mandatory]' if _a.mandatory else '[optional] '} "
+                     f"{'' if _a.enabled else '(disabled) '}→ {_a.api_url}")
+        vlog.log(f"      ORB: {'ON' if _cfg.orb_enabled else 'OFF'}"
+                 f"  ·  routing prompt: {'custom' if _cfg.routing_system_prompt.strip() else 'default'}")
     vlog.log(f"  auth             : {'Bearer token (StaticTokenVerifier)' if auth else 'DISABLED ⚠️ (MCP_ALLOW_INSECURE)'}")
     vlog.log(f"  private fetch     : {'ALLOWED (dev)' if ALLOW_PRIVATE_FETCH else 'blocked (SSRF guard)'}")
     vlog.log(f"  outbound TLS     : {tlsconf.describe()}")

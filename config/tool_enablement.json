@@ -1,0 +1,54 @@
+{
+  "tools": {
+    "Log_Analyzer_Visualizer": {
+      "description": "Analyze and visualize a FortiOS/FortiGate (or FortiAnalyzer) log file. The platform supplies the log automatically via the injected `source_url` field \u2014 you do NOT ask the user for the file and you do NOT fill `source_url`. Pass the user's natural-language question in `question` (optional). Returns one text report: the log analysis and an interactive dashboard link, plus troubleshooting suggestions and any relevant companion analyses. It auto-detects the log's event type and routes internally.",
+      "routing_system_prompt": "You are the analyzer router for the FortiGate Log Analyzer & Visualizer tool. This tool always analyzes and visualizes the uploaded FortiOS/FortiGate log; the log analysis itself is mandatory and already included, so you never decide on it. Your ONLY job is to decide which OPTIONAL companion analyzers add value for THIS user question, given each analyzer's stated purpose. Add a companion analyzer only when the question clearly calls for its specialty (e.g. CPU/memory/conserve-mode pressure \u2192 the performance analyzer; hardware end-of-support / lifecycle dates \u2192 the EoS lookup). If the question is a general log/SLA/traffic/event question with no such specialty, add nothing and let the log analysis stand on its own. Prefer precision over breadth \u2014 do not add an analyzer just because it exists.",
+      "orb_enabled": true,
+      "analyzers": [
+        {
+          "id": "logv",
+          "title": "Log Analyzer & Visualizer",
+          "api_url": "http://127.0.0.1:8802/logVisualizer/api/agent_assist",
+          "mandatory": true,
+          "enabled": true,
+          "timeout": 300,
+          "discover_url": ""
+        },
+        {
+          "id": "perf",
+          "title": "Performance Analyzer",
+          "api_url": "http://127.0.0.1:8811/perf",
+          "mandatory": false,
+          "enabled": true,
+          "timeout": 120,
+          "discover_url": ""
+        }
+      ]
+    },
+    "perf_analyzer": {
+      "description": "Analyze and visualize a FortiOS/FortiGate (or FortiAnalyzer) log file. The platform supplies the log automatically via the injected `source_url` field \u2014 you do NOT ask the user for the file and you do NOT fill `source_url`. Pass the user's natural-language question in `question` (optional). Returns one text report: the log analysis and an interactive dashboard link, plus troubleshooting suggestions and any relevant companion analyses. It auto-detects the log's event type and routes internally.",
+      "routing_system_prompt": "You are the analyzer router for the FortiGate Log Analyzer & Visualizer tool. This tool always analyzes and visualizes the uploaded FortiOS/FortiGate log; the log analysis itself is mandatory and already included, so you never decide on it. Your ONLY job is to decide which OPTIONAL companion analyzers add value for THIS user question, given each analyzer's stated purpose. Add a companion analyzer only when the question clearly calls for its specialty (e.g. CPU/memory/conserve-mode pressure \u2192 the performance analyzer; hardware end-of-support / lifecycle dates \u2192 the EoS lookup). If the question is a general log/SLA/traffic/event question with no such specialty, add nothing and let the log analysis stand on its own. Prefer precision over breadth \u2014 do not add an analyzer just because it exists.",
+      "orb_enabled": false,
+      "analyzers": [
+        {
+          "id": "new_analyzer1",
+          "title": "",
+          "api_url": "http://127.0.0.1:PORT/base",
+          "mandatory": true,
+          "enabled": true,
+          "timeout": 120,
+          "discover_url": ""
+        },
+        {
+          "id": "new_analyzer2",
+          "title": "",
+          "api_url": "http://127.0.0.1:PORT/base",
+          "mandatory": false,
+          "enabled": true,
+          "timeout": 120,
+          "discover_url": ""
+        }
+      ]
+    }
+  }
+}
