@@ -42,6 +42,33 @@ async def _fetch_one(ref: AnalyzerRef) -> AnalyzerDiscovery | None:
         return None
 
 
+async def probe(url: str) -> tuple[AnalyzerDiscovery | None, str]:
+    """Fetch ONE discovery document and report the failure reason if it doesn't answer.
+
+    Used by the GUI's "Add tool / Add analyzer" flow so an operator can paste a base URL and see
+    immediately whether the analyzer speaks the standard contract — and auto-fill its id, title
+    and ``when_to_use`` from what it actually advertises.
+    """
+    url = (url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return None, "URL must start with http:// or https://"
+    if not url.rstrip("/").endswith("/discover"):
+        url = url.rstrip("/") + "/discover"
+    timeout = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, verify=tlsconf.verify_for(url)) as client:
+            resp = await client.get(url)
+        resp.raise_for_status()
+        raw = resp.json()
+        if isinstance(raw, dict) and "analyzer" not in raw and isinstance(raw.get("data"), dict):
+            raw = raw["data"]
+        return AnalyzerDiscovery.model_validate(raw), ""
+    except httpx.HTTPStatusError as e:
+        return None, f"HTTP {e.response.status_code} from {url}"
+    except Exception as e:  # noqa: BLE001
+        return None, f"{type(e).__name__}: {e}"
+
+
 async def discover(refs: list[AnalyzerRef]) -> dict[str, AnalyzerDiscovery]:
     """Fetch discovery for every ref concurrently. Returns {ref.id: AnalyzerDiscovery} for
     the ones that answered."""

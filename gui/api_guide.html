@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VISTA-MCP · API Integration Guide</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --panel2:#fafbfc; --panel3:#f2f4f7;
+    --ink:#11161d; --ink2:#39414d; --muted:#626c7a; --faint:#8b95a3;
+    --line:#e2e6ec; --line2:#eef1f5;
+    --red:#e11d2a; --red-dark:#b3121d; --red-soft:#fdecec; --red-tint:#fef6f6;
+    --ok:#0f8a4d; --ok-soft:#e6f6ed; --skip:#b7791f; --skip-soft:#fdf4e3;
+    --err:#c81e1e; --err-soft:#fdeceb; --info:#2563eb; --info-soft:#e8efff;
+    --shadow-1:0 1px 2px rgba(16,20,28,.06),0 1px 3px rgba(16,20,28,.05);
+    --shadow-2:0 2px 6px rgba(16,20,28,.07),0 10px 26px rgba(16,20,28,.08);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --r-sm:7px; --r-md:10px; --r-lg:14px;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c1015; --panel:#141a21; --panel2:#191f28; --panel3:#1f2631;
+    --ink:#e8eef5; --ink2:#c2ccd8; --muted:#94a0ae; --faint:#6f7b8a;
+    --line:#28303b; --line2:#212832;
+    --red:#ff4a55; --red-dark:#e11d2a; --red-soft:rgba(255,74,85,.16); --red-tint:rgba(255,74,85,.07);
+    --ok:#3fb950; --ok-soft:rgba(63,185,80,.16); --skip:#e3b341; --skip-soft:rgba(227,179,65,.15);
+    --err:#f85149; --err-soft:rgba(248,81,73,.16); --info:#589bff; --info-soft:rgba(88,155,255,.15);
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);
+    --shadow-2:0 2px 8px rgba(0,0,0,.45),0 12px 30px rgba(0,0,0,.4);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14.5px;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--red);text-decoration:none} a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:4px}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+
+  header{position:sticky;top:0;z-index:10;height:56px;display:flex;align-items:center;gap:14px;
+    padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--red)}
+  .brand{font-weight:800;display:flex;align-items:center;gap:10px;font-size:15px;white-space:nowrap}
+  .brand .logo{width:28px;height:28px;border-radius:9px;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-weight:900;font-size:14px;box-shadow:0 2px 8px rgba(225,29,42,.35)}
+  .brand small{color:var(--muted);font-weight:600;font-size:11.5px}
+  .spacer{flex:1}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:7px 12px;font-size:12.5px;font-weight:650;display:inline-flex;align-items:center;gap:7px;
+    cursor:pointer;font-family:inherit;white-space:nowrap}
+  .btn:hover{border-color:var(--red);color:var(--red);background:var(--red-tint);text-decoration:none}
+
+  .layout{display:flex;max-width:1280px;margin:0 auto;gap:34px;padding:28px 20px 80px}
+  nav.toc{position:sticky;top:84px;align-self:flex-start;width:236px;min-width:236px;font-size:13px}
+  nav.toc .t{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);
+    font-weight:750;margin-bottom:9px}
+  nav.toc a{display:block;padding:5px 10px;border-radius:6px;color:var(--ink2);border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel3);color:var(--red);text-decoration:none}
+  nav.toc a.sub{padding-left:22px;font-size:12.5px;color:var(--muted)}
+  main{flex:1;min-width:0}
+
+  h1{font-size:27px;font-weight:800;letter-spacing:-.5px;margin:0 0 6px}
+  .lede{color:var(--muted);font-size:15px;margin:0 0 26px;max-width:76ch}
+  h2{font-size:19px;font-weight:750;margin:38px 0 10px;padding-top:8px;scroll-margin-top:78px;
+    display:flex;align-items:center;gap:10px}
+  h2 .num{width:25px;height:25px;border-radius:7px;background:var(--red);color:#fff;font-size:12.5px;
+    display:grid;place-items:center;font-weight:800;flex:0 0 auto}
+  h3{font-size:15px;font-weight:750;margin:24px 0 8px;scroll-margin-top:78px}
+  p{margin:10px 0;max-width:82ch}
+  ul,ol{padding-left:22px;margin:10px 0;max-width:82ch}
+  li{margin:5px 0}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel3);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;
+    overflow-x:auto;box-shadow:var(--shadow-1);margin:12px 0}
+  pre code{background:none;border:0;padding:0;font-size:12.5px;line-height:1.6}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
+    padding:16px 18px;box-shadow:var(--shadow-1);margin:14px 0}
+  .note{background:var(--info-soft);border-left:3px solid var(--info);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  .warn{background:var(--skip-soft);border-left:3px solid var(--skip);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  .good{background:var(--ok-soft);border-left:3px solid var(--ok);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);
+    font-weight:750;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  td{padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  .tag{display:inline-block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;
+    padding:2px 8px;border-radius:999px}
+  .tag.req{background:var(--red-soft);color:var(--red)}
+  .tag.opt{background:var(--panel3);color:var(--muted)}
+  .tag.get{background:var(--info-soft);color:var(--info)}
+  .tag.post{background:var(--ok-soft);color:var(--ok)}
+  .flowline{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0;font-size:12.5px}
+  .flowline .step{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:5px 13px;font-weight:650;box-shadow:var(--shadow-1)}
+  .flowline .step.hi{border-color:var(--red);color:var(--red)}
+  .flowline .arr{color:var(--faint)}
+  .copybar{display:flex;justify-content:flex-end;margin-bottom:-8px}
+  .copybtn{background:none;border:0;color:var(--faint);font-size:11.5px;cursor:pointer;
+    font-family:inherit;padding:3px 7px;border-radius:5px}
+  .copybtn:hover{color:var(--red);background:var(--panel3)}
+  footer{border-top:1px solid var(--line);margin-top:48px;padding:20px;text-align:center;
+    color:var(--faint);font-size:12.5px}
+  @media (max-width:900px){ nav.toc{display:none} .layout{padding:20px 16px 60px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">V</span>VISTA-MCP <small>· API Integration Guide</small></div>
+  <div class="spacer"></div>
+  <a class="btn" href="./user-guide">📖 User Guide</a>
+  <a class="btn" href="./">← Console</a>
+  <button class="btn" id="themeBtn" title="Toggle dark mode">🌙</button>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <div class="t">On this page</div>
+  <a href="#what">1 · What you are building</a>
+  <a href="#two">2 · The two endpoints</a>
+  <a href="#discover" class="sub">GET /discover</a>
+  <a href="#query" class="sub">POST &lt;query.path&gt;</a>
+  <a href="#models">3 · Copy-paste models</a>
+  <a href="#example">4 · Complete example</a>
+  <a href="#used">5 · How VISTA-MCP uses it</a>
+  <a href="#evolve">6 · Changing your API later</a>
+  <a href="#register">7 · Register it (no code)</a>
+  <a href="#checklist">8 · Checklist &amp; testing</a>
+  <a href="#faq">9 · FAQ</a>
+</nav>
+
+<main>
+  <h1>Plug an analyzer into VISTA-MCP</h1>
+  <p class="lede">
+    VISTA-MCP is an MCP server whose tools are thin entry points into one config-driven
+    orchestrator. It contains <b>no per-analyzer code</b>. If your service exposes the two
+    endpoints on this page, it can be added to any tool from the console — no pull request, no
+    deploy, no restart — and the orchestrator will discover it, decide when it is relevant, call
+    it, and fold its report into the answer the agent receives.
+  </p>
+
+  <h2 id="what"><span class="num">1</span>What you are building</h2>
+  <p>
+    An <b>analyzer</b> is an ordinary HTTP service. It receives a file (plus whatever else it
+    declares) and returns <b>one finished markdown report</b>. It does its own AI/analysis
+    internally — VISTA-MCP never second-guesses it, never re-formats its text, and never calls
+    ORB on its behalf.
+  </p>
+  <div class="flowline">
+    <span class="step">MCP client</span><span class="arr">→</span>
+    <span class="step">VISTA-MCP</span><span class="arr">→</span>
+    <span class="step hi">GET /discover</span><span class="arr">→</span>
+    <span class="step">AI Controller decides + plans</span><span class="arr">→</span>
+    <span class="step hi">POST &lt;query.path&gt;</span><span class="arr">→</span>
+    <span class="step">concatenate + ORB</span><span class="arr">→</span>
+    <span class="step">one report</span>
+  </div>
+  <div class="note">
+    Both endpoints are plain HTTP + JSON. No auth is assumed between the orchestrator and
+    analyzers on the internal network (mTLS or a token can be added later without changing these
+    shapes).
+  </div>
+
+  <h2 id="two"><span class="num">2</span>The two endpoints</h2>
+  <table>
+    <thead><tr><th>Purpose</th><th>Method + path</th><th>Returns</th></tr></thead>
+    <tbody>
+      <tr><td><b>Discovery</b> — what you are + how to call you</td>
+          <td><span class="tag get">GET</span> <code>&lt;base&gt;/discover</code></td>
+          <td><code>AnalyzerDiscovery</code></td></tr>
+      <tr><td><b>Query</b> — do the analysis</td>
+          <td><span class="tag post">POST</span> <code>&lt;query.path&gt;</code></td>
+          <td><code>AnalyzerResult</code></td></tr>
+    </tbody>
+  </table>
+  <p>
+    <code>&lt;base&gt;</code> is the URL an operator types into the console. <code>&lt;query.path&gt;</code>
+    is whatever <i>your discovery advertises</i> — it need not live under <code>&lt;base&gt;</code>.
+    <b>The only path VISTA-MCP hardcodes is <code>/discover</code>.</b> Everything else it learns
+    from you, on every call.
+  </p>
+
+  <h3 id="discover">GET &lt;base&gt;/discover → AnalyzerDiscovery</h3>
+  <div class="copybar"><button class="copybtn" data-copy="d1">copy</button></div>
+<pre id="d1"><code>{
+  "schema_version": "1.0",
+  "surface": "analyzer",
+  "base_url": "http://host/perf",
+  "analyzer": {
+    "id": "perf",                       // stable short id (also the id used in the tool config)
+    "title": "Performance Analyzer",
+    "summary": "One-line description.",
+    "when_to_use": "The text the AI Controller reads to decide. Be specific: say exactly which
+                    questions this analyzer answers and which it does NOT.",
+    "input_types": ["FortiOS/FortiGate log or config file"],
+    "supported_log_types": []           // optional; [] = not log-type specific
+  },
+  "query": {
+    "method": "POST",
+    "path": "http://host/perf/run",     // fully-qualified, ready to call
+    "content_type": "multipart/form-data",
+    "params": [
+      { "name": "file",     "required": true,  "type": "file",   "location": "file",
+        "description": "The file to analyze." },
+      { "name": "question", "required": false, "type": "string", "location": "form",
+        "description": "The user's natural-language question (optional)." },
+      { "name": "mode",     "required": true,  "type": "string", "location": "form",
+        "default": "quick",
+        "description": "Analysis depth: 'quick' for a fast scan, 'deep' for a full correlation
+                        pass. Choose 'deep' when the question names a specific device or metric." }
+    ],
+    "response": "AnalyzerResult"
+  }
+}</code></pre>
+
+  <table>
+    <thead><tr><th>Field</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td><code>analyzer.when_to_use</code> <span class="tag req">critical</span></td>
+        <td>The single most important field. It is <i>exactly</i> what the AI Controller reads to
+            decide whether your analyzer is relevant to a question. Write it like a routing rule:
+            <i>“Use for … / do NOT use for …”</i>. A vague one gets you called too often or never.</td></tr>
+      <tr><td><code>query.path</code> <span class="tag req">required</span></td>
+        <td>Must be a fully-qualified URL. This is the only endpoint that will ever be called.</td></tr>
+      <tr><td><code>query.params[]</code> <span class="tag req">required</span></td>
+        <td>Declare <b>every</b> param you accept. A param you don't declare will never be sent —
+            the orchestrator refuses to send anything you didn't advertise.</td></tr>
+      <tr><td><code>params[].description</code></td>
+        <td>Read by the AI Controller when it has to <i>choose a value</i>. Describe the allowed
+            values and when each applies (see <code>mode</code> above) and it will pick sensibly.</td></tr>
+      <tr><td><code>params[].default</code></td>
+        <td>The value to send when nobody has a better one. <b>If you add a required param, give it
+            a default</b> — that keeps working even when the AI gateway is unreachable.</td></tr>
+      <tr><td><code>params[].location</code></td>
+        <td><code>"file"</code> for the uploaded file, <code>"form"</code> for everything else.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Extra fields are allowed and ignored (forward-compatible). An <code>ApiResponse</code> envelope
+    (<code>{ok, kind, data:{…}}</code>) is tolerated: if the top level has no <code>analyzer</code>
+    key but has a dict <code>data</code>, the orchestrator reads <code>data</code>.
+  </p>
+
+  <h3 id="query">POST &lt;query.path&gt; → AnalyzerResult</h3>
+  <p>A multipart request built from exactly what you declared. You return:</p>
+  <div class="copybar"><button class="copybtn" data-copy="d2">copy</button></div>
+<pre id="d2"><code>{
+  "schema_version": "1.0",
+  "ok": true,
+  "analyzer_id": "perf",
+  "title": "Performance Analyzer",              // section heading in the combined report
+  "report_markdown": "# Performance Analyzer\n\n…your finished contribution…",
+  "artifacts": { "session_id": null, "view_url": null, "iframe_url": null },   // optional extras
+  "meta": { "log_type": "System:sdwan", "elapsed_ms": 1234, "total_logs": 29169 },
+  "error": null
+}</code></pre>
+  <div class="good">
+    <b><code>report_markdown</code> is the contract.</b> It is your finished, human-readable
+    contribution — format it completely, including your own heading. The orchestrator joins each
+    analyzer's <code>report_markdown</code> with a horizontal rule and never rewrites it.
+  </div>
+  <ul>
+    <li><b>Always return 2xx with <code>ok</code></b> where you can. On a handled error return
+      <code>ok:false</code> with a short <code>error</code> and a one-line
+      <code>report_markdown</code> explaining it — don't 500. (The orchestrator is fail-soft
+      either way, but a clean result is friendlier to the engineer reading the answer.)</li>
+    <li><b>Reduce, don't dump.</b> Your text lands in an agent's context window. The heavy
+      reduction is your job.</li>
+    <li><b><code>meta</code> is free-form</b> and is stored per job — <code>elapsed_ms</code>,
+      <code>log_type</code>, counts and “supported” flags all show up in the console.</li>
+    <li><b>Don't call ORB.</b> The orchestrator adds ORB troubleshooting once, at the very end.</li>
+  </ul>
+
+  <h2 id="models"><span class="num">3</span>Copy-paste models</h2>
+  <p>Your service only has to <i>emit</i> these shapes. Copy them into your project:</p>
+  <div class="copybar"><button class="copybtn" data-copy="d3">copy</button></div>
+<pre id="d3"><code>from pydantic import BaseModel, Field
+from typing import Any
+
+class AnalyzerParam(BaseModel):
+    name: str; required: bool = False
+    type: str = "string"        # "string" | "file"
+    location: str = "form"      # "form" | "file"
+    description: str = ""       # the AI Controller reads this when choosing a value
+    default: str = ""           # value to send when nobody has a better one
+
+class AnalyzerQuery(BaseModel):
+    method: str = "POST"
+    path: str                   # fully-qualified URL
+    content_type: str = "multipart/form-data"
+    params: list[AnalyzerParam] = Field(default_factory=list)
+    response: str = "AnalyzerResult"
+
+class AnalyzerInfo(BaseModel):
+    id: str; title: str; summary: str = ""; when_to_use: str = ""
+    input_types: list[str] = Field(default_factory=list)
+    supported_log_types: list[str] = Field(default_factory=list)
+
+class AnalyzerDiscovery(BaseModel):
+    schema_version: str = "1.0"; surface: str = "analyzer"; base_url: str = ""
+    analyzer: AnalyzerInfo; query: AnalyzerQuery
+
+class AnalyzerResult(BaseModel):
+    schema_version: str = "1.0"; ok: bool = True
+    analyzer_id: str = ""; title: str = ""; report_markdown: str = ""
+    artifacts: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None</code></pre>
+
+  <h2 id="example"><span class="num">4</span>A complete analyzer, start to finish</h2>
+  <p>Everything needed to be callable by VISTA-MCP, in one file:</p>
+  <div class="copybar"><button class="copybtn" data-copy="d4">copy</button></div>
+<pre id="d4"><code>from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse
+
+app = FastAPI()
+BASE = "/perf"
+
+@app.get(f"{BASE}/discover")
+def discover(request: Request):
+    root = str(request.base_url).rstrip("/")
+    return {
+        "schema_version": "1.0",
+        "surface": "analyzer",
+        "base_url": f"{root}{BASE}",
+        "analyzer": {
+            "id": "perf",
+            "title": "Performance Analyzer",
+            "summary": "FortiGate CPU/memory/conserve-mode analysis.",
+            "when_to_use": (
+                "Use for FortiGate performance questions — CPU or memory pressure, conserve "
+                "mode, session or resource exhaustion. Do NOT use for routine SLA, traffic or "
+                "event-log questions."
+            ),
+            "input_types": ["FortiOS/FortiGate log file"],
+            "supported_log_types": [],
+        },
+        "query": {
+            "method": "POST",
+            "path": f"{root}{BASE}/run",
+            "content_type": "multipart/form-data",
+            "params": [
+                {"name": "file", "required": True, "type": "file", "location": "file",
+                 "description": "The file to analyze."},
+                {"name": "question", "required": False, "type": "string", "location": "form",
+                 "description": "The user's question (optional)."},
+            ],
+            "response": "AnalyzerResult",
+        },
+    }
+
+@app.post(f"{BASE}/run")
+async def run(file: UploadFile = File(...), question: str = Form("")):
+    data = await file.read()
+    report = analyze(data, question)          # ← your logic; returns finished markdown
+    return JSONResponse({
+        "schema_version": "1.0", "ok": True,
+        "analyzer_id": "perf", "title": "Performance Analyzer",
+        "report_markdown": report,
+        "artifacts": {}, "meta": {"bytes": len(data)}, "error": None,
+    })</code></pre>
+  <p>
+    Two working references ship with the repo:
+    <code>fakes/fake_analyzer.py</code> (the shape above) and
+    <code>fakes/fake_analyzer_v2.py</code> (the same contract with a deliberately different
+    request shape — see <a href="#evolve">§6</a>).
+  </p>
+
+  <h2 id="used"><span class="num">5</span>How VISTA-MCP uses your discovery</h2>
+  <div class="copybar"><button class="copybtn" data-copy="d5">copy</button></div>
+<pre id="d5"><code>DISCOVER   GET &lt;base&gt;/discover                      → your contract        (every run, concurrent)
+DECIDE     AI Controller reads analyzer.when_to_use  → call this analyzer?
+PLAN       AI Controller reads query.{method,path,content_type,params}
+                                                     → a request plan for this call
+VALIDATE   the plan is checked field-by-field against your discovery document
+CALL       execute the plan                          → your AnalyzerResult (concurrent)
+CONCAT     join every report_markdown with a horizontal rule
+ORB        (once, if the tool enables it) appended as "## ORB Suggestions"</code></pre>
+  <p>Three consequences worth knowing:</p>
+  <ul>
+    <li><b>Your discovery is fetched on <i>every</i> call</b>, not cached from yesterday. What you
+      advertise now is what gets used now.</li>
+    <li><b>The AI Controller never skips</b> — even for a tool whose analyzers are all mandatory it
+      still runs, precisely so a contract change is noticed the moment it happens.</li>
+    <li><b>The model proposes; your document decides.</b> A proposed request is validated against
+      your discovery: an undeclared field, an unadvertised path, a foreign host or a wrong verb is
+      corrected or dropped before anything is sent, and the correction is recorded on the job.</li>
+  </ul>
+  <div class="warn">
+    <b>Fail-safe:</b> if the AI gateway is down, the orchestrator runs every optional analyzer and
+    builds each request straight from your discovery. Required params fall back to their
+    <code>default</code> — which is why declaring one matters.
+  </div>
+
+  <h2 id="evolve"><span class="num">6</span>Changing your API later</h2>
+  <p>This is the point of reading discovery on every call. You may:</p>
+  <table>
+    <thead><tr><th>Change</th><th>What VISTA-MCP does</th><th>What you should do</th></tr></thead>
+    <tbody>
+      <tr><td>Rename the file param (<code>file</code> → <code>payload</code>)</td>
+          <td>attaches the file to the newly declared file param</td><td>just declare it</td></tr>
+      <tr><td>Rename the question param (<code>question</code> → <code>query</code>)</td>
+          <td>sends the question to the new name</td><td>keep <code>description</code> clear</td></tr>
+      <tr><td>Move the endpoint (<code>/run</code> → <code>/v2/analyze</code>)</td>
+          <td>calls the newly advertised <code>query.path</code></td>
+          <td>keep the old path alive briefly if other clients exist</td></tr>
+      <tr><td>Add an <b>optional</b> param</td>
+          <td>omitted unless the AI Controller sees a reason to set it</td>
+          <td>describe when it matters</td></tr>
+      <tr><td>Add a <b>required</b> param</td>
+          <td>the AI Controller picks a value from your <code>description</code>; the no-AI path
+              sends your <code>default</code></td>
+          <td><b>always give it a <code>default</code></b></td></tr>
+      <tr><td>Switch to <code>application/json</code></td>
+          <td>sends a JSON body built from your declared params</td>
+          <td>note that a JSON body carries no file</td></tr>
+    </tbody>
+  </table>
+  <div class="good">
+    None of these need a VISTA-MCP change, a restart, or a config edit. Ship your new discovery
+    document and the very next call follows it.
+  </div>
+  <p>
+    What a caller will <b>never</b> do, by design: send a param you didn't declare, call a path you
+    didn't advertise, or use a verb or host you didn't advertise.
+  </p>
+
+  <h2 id="register"><span class="num">7</span>Register it — no code, no restart</h2>
+  <ol>
+    <li>Open the console → <b>⚙ Add / Edit Tools</b>.</li>
+    <li>Find the tool your analyzer belongs to (or <b>＋ New tool</b> to create one).</li>
+    <li><b>＋ add analyzer</b>, paste your base URL, press <b>🔌 Test &amp; autofill</b>. The console
+      calls your <code>/discover</code>, confirms the contract, fills in id and title, and shows
+      your <code>when_to_use</code> back to you.</li>
+    <li>Pick the role:
+      <ul>
+        <li><b>mandatory</b> — always called for this tool.</li>
+        <li><b>optional</b> — called only when the AI Controller judges it relevant.</li>
+      </ul>
+    </li>
+    <li><b>Save &amp; reload.</b> Live immediately.</li>
+  </ol>
+  <p>The same thing by hand, in <code>config/tool_enablement.json</code>:</p>
+  <div class="copybar"><button class="copybtn" data-copy="d6">copy</button></div>
+<pre id="d6"><code>{
+  "id": "perf",
+  "title": "Performance Analyzer",
+  "api_url": "https://vista.fortinet.com/perf",
+  "discover_url": "",          // empty ⇒ derived as api_url + "/discover"
+  "mandatory": false,          // false ⇒ the AI Controller decides per question
+  "enabled": true,
+  "timeout": 120
+}</code></pre>
+
+  <h2 id="checklist"><span class="num">8</span>Checklist &amp; testing</h2>
+  <div class="card">
+    <ul style="margin:0">
+      <li><code>GET &lt;base&gt;/discover</code> returns 200 with a valid <code>AnalyzerDiscovery</code></li>
+      <li><code>when_to_use</code> reads like a routing rule, including what <i>not</i> to use it for</li>
+      <li>every param is declared, with a <code>description</code></li>
+      <li>every <b>required</b> param has a <code>default</code></li>
+      <li><code>query.path</code> is fully qualified and reachable from the VISTA-MCP host</li>
+      <li>the query endpoint returns <code>AnalyzerResult</code> with a fully-formatted <code>report_markdown</code></li>
+      <li>handled errors return <code>ok:false</code> + a one-line report, not a 500</li>
+      <li>your own timeout is below the <code>timeout</code> configured for you in the tool</li>
+      <li><b>🔌 Test &amp; autofill</b> goes green in the console</li>
+    </ul>
+  </div>
+  <p>Verify by hand before registering:</p>
+  <div class="copybar"><button class="copybtn" data-copy="d7">copy</button></div>
+<pre id="d7"><code># 1. discovery is valid JSON and advertises your query path
+curl -s https://your-host/perf/discover | python3 -m json.tool
+
+# 2. the endpoint it advertises actually works
+curl -s -X POST https://your-host/perf/run \
+     -F 'file=@sample.log' -F 'question=High CPU and conserve mode' | python3 -m json.tool
+
+# 3. the console agrees (from the VISTA-MCP host)
+curl -s -X POST http://127.0.0.1:8100/gui/api/probe \
+     -H 'Content-Type: application/json' -d '{"url":"https://your-host/perf"}'</code></pre>
+  <p>
+    After the first real call, open the job in the console and click your analyzer's node: the
+    <b>Request sent</b> block shows exactly what arrived at your service, and <b>Live discovery
+    document</b> shows the contract that produced it.
+  </p>
+
+  <h2 id="faq"><span class="num">9</span>FAQ</h2>
+  <h3>Does my analyzer have to take a log file?</h3>
+  <p>No. Declare whatever params you accept. If you declare no file param and a JSON content type,
+     you get a JSON body built from your declared params.</p>
+  <h3>Can I be called by more than one MCP tool?</h3>
+  <p>Yes — add the same analyzer to as many tools as you like. Each tool decides independently
+     whether you are mandatory or optional, and each has its own routing prompt.</p>
+  <h3>What happens if I'm slow or down?</h3>
+  <p>Fail-soft. If <code>/discover</code> doesn't answer you are dropped for that run and the other
+     analyzers proceed. If the call fails or times out (per-analyzer <code>timeout</code>), the
+     other analyzers still answer and your section is replaced by a short error note.</p>
+  <h3>Who calls ORB?</h3>
+  <p>The orchestrator, once, at the very end, using the combined report. Analyzers must not.</p>
+  <h3>How do I know whether the AI Controller is choosing me?</h3>
+  <p>The console's <b>Dashboard → By analyzer</b> shows how often you were selected, called, and
+     succeeded. If you're never selected, sharpen <code>when_to_use</code>; if you're selected too
+     often, say explicitly what you are <i>not</i> for.</p>
+  <h3>Where is the authoritative version of this?</h3>
+  <p><code>docs/analyzer_api.md</code> in the repo. This page mirrors it.</p>
+</main>
+</div>
+
+<footer>VISTA-MCP · analyzer contract v1.0 · <a href="./user-guide">User Guide</a> · <a href="./">Console</a></footer>
+
+<script>
+(function(){
+  const saved = localStorage.getItem("vista-theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", saved || (prefersDark ? "dark" : "light"));
+  const b = document.getElementById("themeBtn");
+  const sync = () => b.textContent = document.documentElement.getAttribute("data-theme")==="dark" ? "☀️" : "🌙";
+  sync();
+  b.onclick = () => {
+    const next = document.documentElement.getAttribute("data-theme")==="dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("vista-theme", next); sync();
+  };
+  document.querySelectorAll(".copybtn").forEach(btn => btn.onclick = () => {
+    const el = document.getElementById(btn.dataset.copy);
+    navigator.clipboard.writeText(el.innerText).then(() => {
+      const t = btn.textContent; btn.textContent = "copied ✓";
+      setTimeout(() => btn.textContent = t, 1400);
+    });
+  });
+})();
+</script>
+</body>
+</html>

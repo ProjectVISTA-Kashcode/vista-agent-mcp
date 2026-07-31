@@ -3,302 +3,918 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>VISTA-MCP · Orchestrator Flow</title>
+<title>VISTA-MCP · Orchestrator Console</title>
 <style>
-  /* ---- light (default) : red + white ---- */
+  /* ==========================================================================
+     VISTA-MCP operator console — design tokens
+     Same typeface stack as before (system UI + system mono); everything else is
+     rebuilt around an 8px rhythm, one accent (Fortinet red) and AA-contrast text.
+     ========================================================================== */
   :root{
-    --bg:#f4f5f7; --panel:#ffffff; --panel2:#ffffff; --ink:#1b1f24; --muted:#6b7280;
-    --line:#e5e7eb; --line2:#eef0f3; --dot:#dcdfe4;
-    --red:#e11d2a; --red-dark:#b3121d; --red-soft:#fdeded; --red-tint:#fef4f4;
-    --ok:#128a4e; --ok-soft:#e7f6ee; --skip:#c77700; --skip-soft:#fdf3e3;
-    --err:#c81e1e; --err-soft:#fdecec; --pend:#9ca3af;
-    --mand:#b3121d; --field:#ffffff; --edgeline:#c6cbd3; --edgeidle:#dfe2e7;
-    --shadow:0 1px 3px rgba(20,20,30,.08),0 6px 18px rgba(20,20,30,.06);
+    --bg:#f5f6f8; --panel:#ffffff; --panel2:#fafbfc; --panel3:#f2f4f7;
+    --ink:#11161d; --ink2:#39414d; --muted:#626c7a; --faint:#8b95a3;
+    --line:#e2e6ec; --line2:#eef1f5; --dot:#d9dee5;
+    --red:#e11d2a; --red-dark:#b3121d; --red-soft:#fdecec; --red-tint:#fef6f6;
+    --ok:#0f8a4d; --ok-soft:#e6f6ed; --skip:#b7791f; --skip-soft:#fdf4e3;
+    --err:#c81e1e; --err-soft:#fdeceb; --pend:#98a2b0; --info:#2563eb; --info-soft:#e8efff;
+    --mand:#b3121d; --field:#ffffff; --edgeline:#c3c9d2; --edgeidle:#dde1e7;
+    --shadow-1:0 1px 2px rgba(16,20,28,.06),0 1px 3px rgba(16,20,28,.05);
+    --shadow-2:0 2px 6px rgba(16,20,28,.07),0 10px 26px rgba(16,20,28,.08);
+    --shadow-3:0 24px 70px rgba(10,14,20,.28);
     --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --r-sm:7px; --r-md:10px; --r-lg:14px; --r-xl:18px;
+    --hdr:56px; --sub:46px;
   }
-  /* ---- dark ---- */
   :root[data-theme="dark"]{
-    --bg:#0e1114; --panel:#161b21; --panel2:#1b2129; --ink:#e6edf3; --muted:#98a2ad;
-    --line:#2a313a; --line2:#222a32; --dot:#232a32;
-    --red:#f0323f; --red-dark:#c81e1e; --red-soft:rgba(240,50,63,.15); --red-tint:rgba(240,50,63,.07);
-    --ok:#3fb950; --ok-soft:rgba(63,185,80,.15); --skip:#e3b341; --skip-soft:rgba(227,179,65,.14);
-    --err:#f85149; --err-soft:rgba(248,81,73,.15); --pend:#6b7480;
-    --mand:#f0323f; --field:#0d1117; --edgeline:#3a434e; --edgeidle:#2a313a;
-    --shadow:0 1px 3px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.35);
+    --bg:#0c1015; --panel:#141a21; --panel2:#191f28; --panel3:#1f2631;
+    --ink:#e8eef5; --ink2:#c2ccd8; --muted:#94a0ae; --faint:#6f7b8a;
+    --line:#28303b; --line2:#212832; --dot:#1e2530;
+    --red:#ff4a55; --red-dark:#e11d2a; --red-soft:rgba(255,74,85,.16); --red-tint:rgba(255,74,85,.07);
+    --ok:#3fb950; --ok-soft:rgba(63,185,80,.16); --skip:#e3b341; --skip-soft:rgba(227,179,65,.15);
+    --err:#f85149; --err-soft:rgba(248,81,73,.16); --pend:#68727f;
+    --info:#589bff; --info-soft:rgba(88,155,255,.15);
+    --mand:#ff4a55; --field:#0d1219; --edgeline:#3b4653; --edgeidle:#28303b;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);
+    --shadow-2:0 2px 8px rgba(0,0,0,.45),0 12px 30px rgba(0,0,0,.4);
+    --shadow-3:0 26px 80px rgba(0,0,0,.65);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
-  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;overflow:hidden;transition:background .2s,color .2s}
-  a{color:var(--red)}
-  button{font-family:inherit;cursor:pointer}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;
+    overflow:hidden;-webkit-font-smoothing:antialiased}
+  a{color:var(--red);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+  button{cursor:pointer}
+  ::selection{background:var(--red-soft)}
+  :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:4px}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-  header{height:56px;display:flex;align-items:center;gap:14px;padding:0 20px;background:var(--panel);
-    border-bottom:3px solid var(--red)}
-  header .brand{font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:10px;font-size:16px}
-  header .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--red);color:#fff;
-    display:grid;place-items:center;font-weight:900;font-size:13px;box-shadow:0 2px 6px rgba(225,29,42,.4)}
-  header .brand small{color:var(--muted);font-weight:600;font-size:12px}
-  header .spacer{flex:1}
-  .live{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
-  .live .beat{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:beat 1.4s infinite}
-  @keyframes beat{0%,100%{opacity:.3}50%{opacity:1}}
-  header button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;
-    padding:8px 13px;font-size:13px;font-weight:600}
-  header button:hover{border-color:var(--red);color:var(--red)}
-  header button.primary{background:var(--red);color:#fff;border-color:var(--red)}
-  header button.primary:hover{background:var(--red-dark);color:#fff}
-  header button.icon{padding:8px 10px}
+  /* scrollbars */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid transparent;
+    background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--edgeline);background-clip:content-box}
+  ::-webkit-scrollbar-track{background:transparent}
 
-  .tabbar{display:flex;align-items:center;gap:8px;padding:9px 20px;background:var(--panel);
-    border-bottom:1px solid var(--line);overflow-x:auto}
-  .tabbar .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
-    font-weight:700;margin-right:4px;white-space:nowrap}
-  .tab{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:6px 14px;font-size:13px;
-    font-weight:600;color:var(--ink);white-space:nowrap;display:flex;align-items:center;gap:7px;transition:all .12s}
+  /* ---------- header ---------- */
+  header{height:var(--hdr);display:flex;align-items:center;gap:16px;padding:0 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);position:relative;z-index:20}
+  header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--red)}
+  .brand{font-weight:800;letter-spacing:-.2px;display:flex;align-items:center;gap:10px;font-size:15px;
+    white-space:nowrap}
+  .brand .logo{width:28px;height:28px;border-radius:9px;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-weight:900;font-size:14px;
+    box-shadow:0 2px 8px rgba(225,29,42,.35)}
+  .brand small{color:var(--muted);font-weight:600;font-size:11.5px;letter-spacing:.2px}
+  .viewtabs{display:flex;gap:2px;background:var(--panel3);padding:3px;border-radius:var(--r-md);
+    border:1px solid var(--line)}
+  .viewtab{border:0;background:transparent;color:var(--muted);font-weight:650;font-size:13px;
+    padding:6px 14px;border-radius:7px;display:flex;align-items:center;gap:7px;transition:.14s}
+  .viewtab:hover{color:var(--ink)}
+  .viewtab.active{background:var(--panel);color:var(--red);box-shadow:var(--shadow-1)}
+  .spacer{flex:1}
+  .live{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11.5px;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .live .beat{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:beat 1.6s infinite}
+  .live.off .beat{background:var(--muted);animation:none}
+  .live.stale .beat{background:var(--skip)}
+  @keyframes beat{0%,100%{opacity:.25;transform:scale(.85)}50%{opacity:1;transform:scale(1)}}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:7px 12px;font-size:12.5px;font-weight:650;display:inline-flex;align-items:center;gap:7px;
+    transition:.14s;white-space:nowrap}
+  .btn:hover{border-color:var(--red);color:var(--red);background:var(--red-tint)}
+  .btn.primary{background:var(--red);color:#fff;border-color:var(--red)}
+  .btn.primary:hover{background:var(--red-dark);color:#fff}
+  .btn.ghost{background:transparent}
+  .btn.icon{padding:7px 9px}
+  .btn.sm{padding:4px 9px;font-size:11.5px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.link{background:none;border:0;color:var(--red);padding:6px 4px;font-weight:650;font-size:12.5px}
+  .btn.link:hover{text-decoration:underline;background:none}
+
+  /* ---------- views ---------- */
+  .view{display:none;height:calc(100% - var(--hdr));flex-direction:column}
+  .view.active{display:flex}
+
+  /* ---------- flow view ---------- */
+  .tabbar{display:flex;align-items:center;gap:8px;padding:0 16px;height:var(--sub);
+    background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;flex:0 0 auto}
+  .tabbar .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);
+    font-weight:750;margin-right:2px;white-space:nowrap}
+  .tab{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:5px 13px;
+    font-size:12.5px;font-weight:650;color:var(--ink2);white-space:nowrap;display:flex;
+    align-items:center;gap:7px;transition:.14s}
   .tab:hover{border-color:var(--red);color:var(--red)}
-  .tab.active{background:var(--red);color:#fff;border-color:var(--red);box-shadow:0 2px 8px rgba(225,29,42,.28)}
-  .tab .cnt{font-size:10.5px;background:var(--red-soft);color:var(--red);border-radius:999px;padding:0 6px;font-weight:700}
-  .tab.active .cnt{background:rgba(255,255,255,.25);color:#fff}
-  .tab.addtool{border-style:dashed;color:var(--muted)}
+  .tab.active{background:var(--red);color:#fff;border-color:var(--red);
+    box-shadow:0 2px 8px rgba(225,29,42,.25)}
+  .tab .cnt{font-size:10px;background:var(--red-soft);color:var(--red);border-radius:999px;
+    padding:1px 6px;font-weight:750}
+  .tab.active .cnt{background:rgba(255,255,255,.24);color:#fff}
+  .tab.addtool{border-style:dashed;color:var(--muted);background:transparent}
 
-  .wrap{display:flex;height:calc(100% - 56px - 47px)}
-  aside{width:326px;min-width:326px;border-right:1px solid var(--line);background:var(--panel);
+  .wrap{display:flex;flex:1;min-height:0}
+  aside.jobs-pane{width:300px;min-width:300px;border-right:1px solid var(--line);background:var(--panel);
     display:flex;flex-direction:column}
-  aside .hd{padding:13px 16px;font-size:11.5px;text-transform:uppercase;letter-spacing:.7px;
-    color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
-  aside .hd .n{background:var(--red-soft);color:var(--red);border-radius:999px;padding:1px 9px;font-size:11px}
-  .jobs{overflow:auto;flex:1}
-  .job{padding:12px 16px;border-bottom:1px solid var(--line2);cursor:pointer;transition:background .12s;
+  .pane-hd{padding:11px 14px;font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--faint);font-weight:750;border-bottom:1px solid var(--line);display:flex;
+    justify-content:space-between;align-items:center;gap:8px}
+  .pane-hd .n{background:var(--red-soft);color:var(--red);border-radius:999px;padding:1px 8px;
+    font-size:10.5px}
+  .joblist{overflow:auto;flex:1}
+  .job{padding:11px 14px;border-bottom:1px solid var(--line2);cursor:pointer;transition:.12s;
     border-left:3px solid transparent}
   .job:hover{background:var(--red-tint)}
   .job.sel{background:var(--red-soft);border-left-color:var(--red)}
-  .job .row1{display:flex;align-items:center;gap:8px;margin-bottom:5px}
-  .job .tool{font-weight:700;font-size:12.5px}
+  .job .row1{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .job .tool{font-weight:700;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .job .q{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .job .row2{display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11px;color:var(--muted)}
-  .chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px}
+  .job .row2{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:10.5px;color:var(--faint)}
+  .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;
+    font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
   .chip.running{background:var(--red-soft);color:var(--red)}
   .chip.done{background:var(--ok-soft);color:var(--ok)}
   .chip.error{background:var(--err-soft);color:var(--err)}
-  .pill{font-family:var(--mono);font-size:10px;background:var(--field);border:1px solid var(--line);
+  .chip.skipped{background:var(--skip-soft);color:var(--skip)}
+  .chip.neutral{background:var(--panel3);color:var(--muted)}
+  .chip.info{background:var(--info-soft);color:var(--info)}
+  .pill{font-family:var(--mono);font-size:10px;background:var(--panel3);border:1px solid var(--line);
     border-radius:5px;padding:1px 5px;color:var(--muted)}
 
-  main{flex:1;display:flex;flex-direction:column;min-width:0}
-  .detailbar{padding:13px 20px;border-bottom:1px solid var(--line);background:var(--panel);
-    display:flex;align-items:center;gap:14px;min-height:58px}
-  .detailbar .title{font-weight:700}
-  .detailbar .sub{color:var(--muted);font-size:12px;max-width:52ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .detailbar .metrics{margin-left:auto;display:flex;gap:18px;font-size:12px;color:var(--muted)}
-  .detailbar .metrics b{color:var(--ink);font-weight:700}
+  main.flowmain{flex:1;display:flex;flex-direction:column;min-width:0}
+  .detailbar{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;min-height:56px;flex:0 0 auto}
+  .detailbar .title{font-weight:750;font-size:14px;display:flex;align-items:center;gap:9px}
+  .detailbar .sub{color:var(--muted);font-size:12px;max-width:62ch;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .metrics{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .metric{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:5px 10px;font-size:11px;color:var(--muted);white-space:nowrap}
+  .metric b{color:var(--ink);font-weight:750;font-variant-numeric:tabular-nums}
 
-  .canvas{flex:1;overflow:auto;position:relative;padding:44px 52px;background-color:var(--bg);
-    background-image:radial-gradient(var(--dot) 1.1px, transparent 1.1px);background-size:20px 20px}
-  #edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
-  .flow{position:relative;display:flex;align-items:center;gap:66px;min-width:max-content;padding:14px 0 24px}
-  .col{display:flex;flex-direction:column;gap:24px;align-items:center;position:relative;z-index:2}
-  .node{width:196px;background:var(--panel2);border:1.5px solid var(--line);border-radius:13px;
-    padding:12px 14px;position:relative;box-shadow:var(--shadow);overflow:hidden}
-  .node .nhd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
-  .node .nhd .ico{font-size:15px}
-  .node .det{color:var(--muted);font-size:11.5px;margin-top:7px;line-height:1.45;max-height:52px;overflow:hidden;word-break:break-word}
-  .node .foot{display:flex;justify-content:space-between;align-items:center;margin-top:9px}
-  .node .st{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
-  .node .ms{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
-  .node .tag{position:absolute;top:8px;right:10px;font-size:9px;font-weight:800;padding:2px 7px;
+  .canvas{flex:1;position:relative;overflow:hidden;background-color:var(--bg);
+    background-image:radial-gradient(var(--dot) 1.1px,transparent 1.1px);background-size:22px 22px;
+    cursor:grab;min-height:0}
+  .canvas.grabbing{cursor:grabbing}
+  .stage{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+  .flow{position:relative;display:flex;align-items:center;gap:48px;padding:40px 44px}
+  #edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+  .col{display:flex;flex-direction:column;gap:22px;align-items:center;position:relative;z-index:2}
+  .node{width:206px;background:var(--panel);border:1.5px solid var(--line);border-radius:var(--r-lg);
+    padding:11px 13px;position:relative;box-shadow:var(--shadow-1);overflow:hidden;cursor:pointer;
+    transition:box-shadow .15s,border-color .15s,transform .1s}
+  .node:hover{box-shadow:var(--shadow-2);transform:translateY(-1px)}
+  .node.active{outline:2px solid var(--red);outline-offset:2px}
+  .node .nhd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px;
+    padding-right:6px;line-height:1.3}
+  .node .nhd .ico{font-size:15px;flex:0 0 auto}
+  .node .nhd .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .node .det{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.45;max-height:48px;
+    overflow:hidden;word-break:break-word}
+  .node .foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px}
+  .node .st{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+  .node .ms{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .node .tag{position:absolute;top:9px;right:10px;font-size:8.5px;font-weight:800;padding:2px 6px;
     border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
   .tag.mand{background:var(--mand);color:#fff}
   .tag.opt{background:var(--red-soft);color:var(--red);border:1px solid var(--red)}
-  .node .bar{position:absolute;left:0;top:0;bottom:0;width:5px}
-  .node.pending{opacity:.72}.node.pending .st{color:var(--pend)}.pending .bar{background:var(--pend)}
-  .node.running{border-color:var(--red);box-shadow:0 0 0 4px var(--red-soft),var(--shadow);animation:pulse 1.3s infinite}
+  .node .bar{position:absolute;left:0;top:0;bottom:0;width:4px}
+  .node.pending{opacity:.7}.node.pending .st{color:var(--pend)}.pending .bar{background:var(--pend)}
+  .node.running{border-color:var(--red);animation:pulse 1.5s infinite}
   .node.running .st{color:var(--red)}.running .bar{background:var(--red)}
-  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px var(--red-soft),var(--shadow)}50%{box-shadow:0 0 0 7px var(--red-tint),var(--shadow)}}
-  .node.ok .st{color:var(--ok)}.ok .bar{background:var(--ok)}.node.ok{border-color:var(--ok)}
-  .node.skipped .st{color:var(--skip)}.skipped .bar{background:var(--skip)}.node.skipped{border-color:var(--skip)}
-  .node.error .st{color:var(--err)}.error .bar{background:var(--err)}.node.error{border-color:var(--err);background:var(--err-soft)}
-  .collabel{position:absolute;top:-26px;left:50%;transform:translateX(-50%);white-space:nowrap;
-    font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 3px var(--red-soft),var(--shadow-1)}
+                   50%{box-shadow:0 0 0 7px var(--red-tint),var(--shadow-1)}}
+  .node.ok .st{color:var(--ok)}.ok .bar{background:var(--ok)}.node.ok{border-color:rgba(15,138,77,.45)}
+  .node.skipped .st{color:var(--skip)}.skipped .bar{background:var(--skip)}
+  .node.skipped{border-color:rgba(183,121,31,.4)}
+  .node.error .st{color:var(--err)}.error .bar{background:var(--err)}
+  .node.error{border-color:var(--err);background:var(--err-soft)}
+  .collabel{position:absolute;top:-24px;left:50%;transform:translateX(-50%);white-space:nowrap;
+    font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);font-weight:750;
+    background:var(--panel3);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
 
-  .events{height:154px;border-top:1px solid var(--line);background:var(--panel);overflow:auto;
-    font-family:var(--mono);font-size:11.5px;padding:10px 16px}
-  .events .ev{padding:2px 0;color:var(--muted);white-space:pre-wrap}
-  .events .ev .k{color:var(--red);font-weight:700}
-  .events .ev.error{color:var(--err)}.events .ev.ok{color:var(--ok)}.events .ev.skipped{color:var(--skip)}
+  .zoomctl{position:absolute;right:14px;bottom:14px;display:flex;gap:6px;background:var(--panel);
+    border:1px solid var(--line);border-radius:var(--r-md);padding:5px;box-shadow:var(--shadow-2);z-index:5}
+  .zoomctl button{border:0;background:transparent;color:var(--ink2);width:28px;height:28px;
+    border-radius:6px;font-size:14px;display:grid;place-items:center}
+  .zoomctl button:hover{background:var(--panel3);color:var(--red)}
+  .zoomctl .zval{min-width:46px;display:grid;place-items:center;font-size:11px;color:var(--muted);
+    font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  .canvas-hint{position:absolute;left:14px;bottom:14px;font-size:11px;color:var(--faint);
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 9px;
+    box-shadow:var(--shadow-1);z-index:5;pointer-events:none}
 
-  .empty{color:var(--muted);padding:52px;text-align:center;font-size:13px;position:absolute;left:0;right:0}
+  /* ---------- console drawer ---------- */
+  .console{flex:0 0 auto;height:190px;border-top:1px solid var(--line);background:var(--panel);
+    display:flex;flex-direction:column;min-height:34px;position:relative}
+  .console.collapsed{height:34px!important}
+  .cgrip{height:5px;cursor:ns-resize;background:transparent;position:absolute;top:-2px;left:0;right:0;z-index:6}
+  .cgrip:hover{background:var(--red-soft)}
+  .chd{height:34px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line2);
+    flex:0 0 auto;background:var(--panel2)}
+  .chd .t{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);font-weight:750}
+  .chd input[type=text]{background:var(--field);border:1px solid var(--line);border-radius:6px;
+    padding:3px 8px;font-size:11.5px;width:170px}
+  .chd select{background:var(--field);border:1px solid var(--line);border-radius:6px;padding:3px 6px;
+    font-size:11.5px}
+  .chd .sw{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+  .chd .sw input{accent-color:var(--red)}
+  .clog{overflow:auto;flex:1;font-family:var(--mono);font-size:11.5px;padding:8px 12px;line-height:1.65}
+  .clog .ev{padding:1px 0;color:var(--ink2);white-space:pre-wrap;word-break:break-word;
+    border-left:2px solid transparent;padding-left:8px;margin-left:-8px}
+  .clog .ev:hover{background:var(--panel3)}
+  .clog .ev .ts{color:var(--faint)}
+  .clog .ev .k{color:var(--red);font-weight:700}
+  .clog .ev .ms{color:var(--info)}
+  .clog .ev.error{color:var(--err);border-left-color:var(--err)}
+  .clog .ev.ok{border-left-color:var(--ok)}
+  .clog .ev.skipped{color:var(--skip);border-left-color:var(--skip)}
+  .clog .ev.running{border-left-color:var(--red)}
+  .clog .ev .more{color:var(--faint);cursor:pointer;user-select:none}
+  .clog .ev .more:hover{color:var(--red)}
+  .clog pre{margin:3px 0 6px 12px;padding:7px 10px;background:var(--panel3);border:1px solid var(--line);
+    border-radius:7px;overflow:auto;max-height:230px;font-size:11px;color:var(--ink2)}
 
-  .modal{position:fixed;inset:0;background:rgba(10,12,16,.5);display:none;align-items:center;
-    justify-content:center;z-index:50;backdrop-filter:blur(2px)}
+  /* ---------- inspector ---------- */
+  aside.inspector{width:0;min-width:0;border-left:1px solid var(--line);background:var(--panel);
+    display:flex;flex-direction:column;overflow:hidden;transition:width .16s ease,min-width .16s ease}
+  aside.inspector.open{width:390px;min-width:390px}
+  .insp-hd{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+    gap:9px;flex:0 0 auto}
+  .insp-hd .ttl{font-weight:750;font-size:13px;display:flex;align-items:center;gap:8px;min-width:0}
+  .insp-hd .ttl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .insp-body{overflow:auto;flex:1;padding:12px 14px}
+  .kv{display:grid;grid-template-columns:112px 1fr;gap:5px 10px;font-size:12px;margin-bottom:12px}
+  .kv dt{color:var(--faint);font-weight:650}
+  .kv dd{margin:0;color:var(--ink2);word-break:break-word;font-variant-numeric:tabular-nums}
+  .sect{margin:0 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--faint);font-weight:750;display:flex;align-items:center;gap:8px}
+  .sect::after{content:"";flex:1;height:1px;background:var(--line)}
+  .codebox{background:var(--panel3);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:9px 11px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;word-break:break-word;
+    max-height:260px;overflow:auto;color:var(--ink2);margin-bottom:12px;line-height:1.55}
+  details.fold{margin-bottom:12px;border:1px solid var(--line);border-radius:var(--r-sm);
+    background:var(--panel2);overflow:hidden}
+  details.fold>summary{cursor:pointer;padding:8px 11px;font-size:12px;font-weight:650;
+    list-style:none;display:flex;align-items:center;gap:7px;color:var(--ink2)}
+  details.fold>summary::-webkit-details-marker{display:none}
+  details.fold>summary::before{content:"▸";color:var(--faint);font-size:10px;transition:.15s}
+  details.fold[open]>summary::before{transform:rotate(90deg)}
+  details.fold>summary:hover{background:var(--panel3)}
+  details.fold>summary .fsum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .popbtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;
+    width:24px;height:22px;font-size:12px;line-height:1;display:grid;place-items:center;flex:0 0 auto;
+    cursor:pointer;font-family:inherit}
+  .popbtn:hover{border-color:var(--red);color:var(--red);background:var(--red-tint)}
+
+  .joblist-end{padding:16px 14px 22px;text-align:center;border-top:1px dashed var(--line);
+    background:var(--panel2)}
+  .joblist-end .t{font-size:11px;color:var(--faint);margin-bottom:9px;line-height:1.5}
+  .joblist-end .btn{width:100%;justify-content:center}
+  details.fold .codebox{margin:0;border:0;border-top:1px solid var(--line);border-radius:0;max-height:320px}
+  .tblmini{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:12px}
+  .tblmini td{padding:4px 6px;border-bottom:1px solid var(--line2);vertical-align:top}
+  .tblmini td:first-child{color:var(--faint);width:110px;font-weight:650}
+  .tblmini td.mono{font-family:var(--mono);font-size:10.5px;word-break:break-all}
+  .notebox{background:var(--skip-soft);border:1px solid rgba(183,121,31,.35);color:var(--skip);
+    border-radius:var(--r-sm);padding:8px 10px;font-size:11.5px;margin-bottom:12px;line-height:1.5}
+  .notebox b{display:block;margin-bottom:3px;text-transform:uppercase;font-size:10px;letter-spacing:.5px}
+
+  /* ---------- dashboard / history shared ---------- */
+  .filterbar{display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap;flex:0 0 auto}
+  .filterbar label{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint);
+    font-weight:750}
+  .filterbar select,.filterbar input[type=text]{background:var(--field);border:1px solid var(--line);
+    border-radius:var(--r-sm);padding:6px 9px;font-size:12.5px;min-width:120px}
+  .filterbar input[type=text]{min-width:240px}
+  .filterbar select:focus,.filterbar input:focus{outline:none;border-color:var(--red);
+    box-shadow:0 0 0 3px var(--red-soft)}
+  .segmented{display:flex;background:var(--panel3);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:2px}
+  .segmented button{border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:650;
+    padding:4px 11px;border-radius:6px}
+  .segmented button.active{background:var(--panel);color:var(--red);box-shadow:var(--shadow-1)}
+  .scroller{flex:1;overflow:auto;padding:16px;min-height:0}
+  .filtersum{padding:8px 16px;background:var(--panel2);border-bottom:1px solid var(--line);
+    font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:0 0 auto}
+  .filtersum b{color:var(--ink);font-weight:700}
+  .filtersum .fchip{background:var(--red-soft);color:var(--red);border-radius:999px;padding:2px 9px;
+    font-weight:700;font-size:11px;display:inline-flex;align-items:center;gap:6px}
+  .filtersum .fchip button{border:0;background:none;color:inherit;cursor:pointer;font-size:12px;
+    line-height:1;padding:0;font-family:inherit;opacity:.7}
+  .filtersum .fchip button:hover{opacity:1}
+  .kpi.clickable{cursor:pointer;transition:border-color .14s,transform .1s,box-shadow .14s}
+  .kpi.clickable:hover{border-color:var(--red);transform:translateY(-1px);box-shadow:var(--shadow-2)}
+  .kpi .go{position:absolute;top:12px;right:14px;font-size:11px;color:var(--faint);opacity:0;transition:.14s}
+  .kpi.clickable:hover .go{opacity:1;color:var(--red)}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;
+    box-shadow:var(--shadow-1);position:relative;overflow:hidden}
+  .kpi .l{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint);
+    font-weight:750;margin-bottom:6px}
+  .kpi .v{font-size:25px;font-weight:800;letter-spacing:-.6px;font-variant-numeric:tabular-nums;
+    line-height:1.1}
+  .kpi .s{font-size:11.5px;color:var(--muted);margin-top:5px}
+  .kpi.accent .v{color:var(--red)}
+  .kpi.ok .v{color:var(--ok)}
+  .kpi.err .v{color:var(--err)}
+  .kpi.info .v{color:var(--info)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(600px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-1);overflow:hidden;display:flex;flex-direction:column}
+  .card.wide{grid-column:1/-1}
+  .card-hd{padding:12px 15px;border-bottom:1px solid var(--line2);display:flex;align-items:center;
+    gap:9px;font-weight:750;font-size:13px}
+  .card-hd .sub{margin-left:auto;font-size:11px;color:var(--faint);font-weight:600}
+  .card-bd{padding:13px 15px;overflow:auto}
+
+  table.data{width:100%;border-collapse:collapse;font-size:12.5px;min-width:380px}
+  table.data th{text-align:left;color:var(--faint);font-weight:750;font-size:10px;
+    text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:var(--panel);z-index:1;white-space:nowrap}
+  table.data td{padding:8px 10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+  table.data tbody tr:hover{background:var(--red-tint)}
+  table.data tbody tr.clickable{cursor:pointer}
+  table.data td.mono{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  table.data td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .truncate{max-width:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar-cell{display:flex;align-items:center;gap:8px}
+  .bar-track{flex:1;height:6px;background:var(--panel3);border-radius:4px;overflow:hidden;min-width:44px}
+  .bar-fill{height:100%;background:var(--red);border-radius:4px}
+  .bar-fill.ok{background:var(--ok)}.bar-fill.info{background:var(--info)}
+
+  .empty{color:var(--muted);padding:40px 20px;text-align:center;font-size:13px}
+  .empty .big{font-size:30px;display:block;margin-bottom:8px;opacity:.55}
+
+  .pager{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line);
+    background:var(--panel);font-size:12px;color:var(--muted);flex:0 0 auto}
+
+  /* ---------- charts (pure SVG) ---------- */
+  .chart{width:100%;display:block;overflow:visible}
+  .chart .grid{stroke:var(--line2);stroke-width:1}
+  .chart .axis{fill:var(--faint);font-size:9.5px;font-family:var(--mono)}
+  .chart rect.b{fill:var(--red);rx:2.5}
+  .chart rect.b.zero{fill:var(--line)}
+  .chart rect.b.err{fill:var(--err)}
+  .chart .ln{fill:none;stroke:var(--info);stroke-width:1.8}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+  .legend i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:5px}
+
+  /* ---------- modals ---------- */
+  .modal{position:fixed;inset:0;background:rgba(8,11,16,.55);display:none;align-items:center;
+    justify-content:center;z-index:60;backdrop-filter:blur(3px);padding:24px}
   .modal.show{display:flex}
-  .sheet{width:min(940px,95vw);max-height:92vh;overflow:auto;background:var(--panel);border-radius:16px;
-    padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
-  .sheet h2{margin:0 0 4px;font-size:18px;display:flex;align-items:center;gap:9px}
-  .sheet h2 .logo{width:22px;height:22px;border-radius:6px;background:var(--red);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:900}
-  .sheet .hint{color:var(--muted);font-size:12.5px;margin-bottom:16px;line-height:1.5}
-  .tool-block{border:1px solid var(--line);border-radius:13px;padding:16px;margin-bottom:16px;background:var(--panel2);box-shadow:var(--shadow)}
-  .tool-block h3{margin:0 0 12px;font-size:14.5px;display:flex;align-items:center;gap:8px}
-  .tool-block h3 .del{margin-left:auto}
-  label.f{display:block;font-size:11px;color:var(--muted);margin:11px 0 4px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
-  .sheet input[type=text],.sheet textarea,.sheet input[type=number]{width:100%;background:var(--field);color:var(--ink);
-    border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-family:inherit;font-size:13px}
-  .sheet input:focus,.sheet textarea:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
-  .sheet textarea{resize:vertical;line-height:1.5}
-  .sheet textarea.mono{font-family:var(--mono);font-size:12px}
-  table.an{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
-  table.an th{text-align:left;color:var(--muted);font-weight:700;font-size:10px;text-transform:uppercase;
-    padding:5px 6px;border-bottom:1px solid var(--line);letter-spacing:.3px}
-  table.an td{padding:4px 6px;border-bottom:1px solid var(--line2)}
-  table.an input[type=text],table.an input[type=number]{padding:6px 8px;font-size:12px}
-  table.an td.ctr{text-align:center}
-  .mini{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600}
-  .mini:hover{border-color:var(--red);color:var(--red)}
-  .mini.danger:hover{border-color:var(--err);color:var(--err)}
-  .sheet .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;position:sticky;bottom:-2px;
-    background:var(--panel);padding-top:14px;border-top:1px solid var(--line2)}
-  .btn-primary{background:var(--red);color:#fff;border:none;border-radius:9px;padding:10px 20px;font-weight:700}
-  .btn-primary:hover{background:var(--red-dark)}
-  .btn-ghost{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:10px 18px;font-weight:600}
-  .savemsg{font-size:12.5px;align-self:center;margin-right:auto;font-weight:600}
-  .savemsg.ok{color:var(--ok)}.savemsg.err{color:var(--err)}
-  .rawtoggle{color:var(--red);cursor:pointer;user-select:none;font-weight:700;white-space:nowrap}
-  #rawEditor{width:100%;min-height:340px}
-  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);font-weight:600}
-  .switch input{accent-color:var(--red)}
+  .sheet{width:min(1000px,96vw);max-height:92vh;display:flex;flex-direction:column;
+    background:var(--panel);border-radius:var(--r-xl);box-shadow:var(--shadow-3);
+    border:1px solid var(--line);overflow:hidden}
+  .sheet.narrow{width:min(760px,96vw)}
+  .sheet.wide{width:min(1180px,97vw)}
+  .sheet-hd{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+    gap:11px;flex:0 0 auto}
+  .sheet-hd h2{margin:0;font-size:16.5px;font-weight:750;display:flex;align-items:center;gap:10px}
+  .sheet-hd .logo{width:26px;height:26px;border-radius:8px;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-size:13px;font-weight:900}
+  .sheet-bd{padding:18px 20px;overflow:auto;flex:1}
+  .sheet-ft{padding:13px 20px;border-top:1px solid var(--line);display:flex;gap:10px;
+    align-items:center;justify-content:flex-end;flex:0 0 auto;background:var(--panel2)}
+  .hint{color:var(--muted);font-size:12.5px;line-height:1.6;margin-bottom:16px}
+  .hint b{color:var(--ink2)}
 
-  /* integrations dashboard */
-  .stat-row{display:flex;gap:14px;margin-bottom:16px}
-  .stat{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
-  .stat .v{font-size:26px;font-weight:800;color:var(--red)}
-  .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-top:2px}
-  .intg{border:1px solid var(--line);border-radius:13px;margin-bottom:12px;overflow:hidden;background:var(--panel2)}
-  .intg .ih{padding:13px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line2)}
-  .intg .ih .name{font-weight:800}
-  .intg .ih .badges{margin-left:auto;display:flex;gap:6px}
-  .badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 9px;border-radius:999px}
-  .badge.on{background:var(--ok-soft);color:var(--ok)}.badge.off{background:var(--line2);color:var(--muted)}
+  .tool-block{border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:14px;
+    background:var(--panel2);overflow:hidden}
+  .tool-block>.th{padding:12px 15px;display:flex;align-items:center;gap:10px;
+    border-bottom:1px solid var(--line2);background:var(--panel)}
+  .tool-block>.th .nm{font-weight:750;font-size:14px;font-family:var(--mono)}
+  .tool-block>.tb{padding:14px 15px}
+  label.f{display:block;font-size:10.5px;color:var(--faint);margin:0 0 5px;text-transform:uppercase;
+    letter-spacing:.6px;font-weight:750}
+  label.f .tip{text-transform:none;letter-spacing:0;color:var(--muted);font-weight:500;
+    margin-left:6px;font-size:11px}
+  .field{margin-bottom:14px}
+  .sheet input[type=text],.sheet textarea,.sheet input[type=number],.sheet select{width:100%;
+    background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:8px 11px;font-size:13px}
+  .sheet input:focus,.sheet textarea:focus,.sheet select:focus{outline:none;border-color:var(--red);
+    box-shadow:0 0 0 3px var(--red-soft)}
+  .sheet textarea{resize:vertical;line-height:1.55}
+  .sheet textarea.mono{font-family:var(--mono);font-size:12px}
+  .sheet input.err,.sheet textarea.err{border-color:var(--err);box-shadow:0 0 0 3px var(--err-soft)}
+  .inline-err{color:var(--err);font-size:11.5px;margin-top:4px;display:block}
+
+  .an-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);
+    padding:12px 13px;margin-bottom:10px}
+  .an-card .ah{display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap}
+  .an-card .ah .idf{font-family:var(--mono);font-weight:750;font-size:12.5px}
+  .an-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .an-grid .full{grid-column:1/-1}
+  .row-flex{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .seg-toggle{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
+  .seg-toggle button{border:0;background:var(--panel2);color:var(--muted);padding:5px 12px;
+    font-size:12px;font-weight:650}
+  .seg-toggle button.on{background:var(--red);color:#fff}
+  .seg-toggle button.on.grey{background:var(--panel3);color:var(--ink2)}
+  .switch{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink2);
+    font-weight:650;cursor:pointer}
+  .switch input{accent-color:var(--red);width:15px;height:15px}
+  .probe-result{margin-top:9px;border-radius:var(--r-sm);padding:9px 11px;font-size:12px;
+    line-height:1.55;border:1px solid var(--line);background:var(--panel2)}
+  .probe-result.ok{border-color:rgba(15,138,77,.4);background:var(--ok-soft);color:var(--ok)}
+  .probe-result.bad{border-color:rgba(200,30,30,.4);background:var(--err-soft);color:var(--err)}
+  .probe-result .wu{color:var(--ink2);display:block;margin-top:5px}
+  .savemsg{font-size:12.5px;margin-right:auto;font-weight:650}
+  .savemsg.ok{color:var(--ok)}.savemsg.err{color:var(--err)}
+  .rawtoggle{margin-left:auto}
+
+  /* integrations */
+  .intg{border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:12px;overflow:hidden;
+    background:var(--panel2)}
+  .intg .ih{padding:12px 15px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line2);
+    background:var(--panel)}
+  .intg .ih .name{font-weight:750;font-family:var(--mono);font-size:13px}
+  .intg .ih .badges{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+  .badge{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 8px;
+    border-radius:999px}
+  .badge.on{background:var(--ok-soft);color:var(--ok)}
+  .badge.off{background:var(--panel3);color:var(--muted)}
   .badge.cust{background:var(--red-soft);color:var(--red)}
-  .intg .idesc{padding:8px 16px 4px;color:var(--muted);font-size:12px;line-height:1.5}
-  .intg table{width:100%;border-collapse:collapse;font-size:12.5px}
-  .intg table td{padding:7px 16px;border-top:1px solid var(--line2)}
-  .intg .aid{font-family:var(--mono);font-weight:700}
-  .intg .arole{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:999px}
-  .arole.mand{background:var(--mand);color:#fff}.arole.opt{background:var(--red-soft);color:var(--red)}
-  .arole.dis{background:var(--line2);color:var(--muted)}
-  .intg .aurl{color:var(--muted);font-family:var(--mono);font-size:11px}
+  .badge.info{background:var(--info-soft);color:var(--info)}
+  .intg .idesc{padding:9px 15px 3px;color:var(--muted);font-size:12px;line-height:1.55}
+  .arole{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;
+    border-radius:999px}
+  .arole.mand{background:var(--mand);color:#fff}
+  .arole.opt{background:var(--red-soft);color:var(--red)}
+  .arole.dis{background:var(--panel3);color:var(--muted)}
+
+  /* guide */
+  .guide h3{margin:22px 0 8px;font-size:14.5px;font-weight:750;display:flex;align-items:center;gap:8px}
+  .guide h3:first-child{margin-top:0}
+  .guide p,.guide li{font-size:13px;line-height:1.7;color:var(--ink2)}
+  .guide ol,.guide ul{padding-left:20px;margin:8px 0}
+  .guide li{margin-bottom:5px}
+  .guide code{font-family:var(--mono);font-size:12px;background:var(--panel3);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px}
+  .guide .step{display:flex;gap:12px;margin-bottom:12px;align-items:flex-start}
+  .guide .step .n{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:var(--red);
+    color:#fff;display:grid;place-items:center;font-size:12px;font-weight:800}
+  .guide .note{background:var(--info-soft);border-left:3px solid var(--info);border-radius:0 8px 8px 0;
+    padding:10px 13px;font-size:12.5px;color:var(--ink2);margin:10px 0;line-height:1.6}
+  .guide .toc{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px}
+  .guide .toc a{font-size:12px;background:var(--panel3);border:1px solid var(--line);border-radius:999px;
+    padding:4px 11px;color:var(--ink2);font-weight:600}
+  .guide .toc a:hover{border-color:var(--red);color:var(--red);text-decoration:none}
+
+  /* toast */
+  #toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:90}
+  .toast{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--red);
+    border-radius:var(--r-md);padding:11px 15px;box-shadow:var(--shadow-2);font-size:12.5px;
+    min-width:240px;max-width:380px;animation:slidein .18s ease}
+  .toast.ok{border-left-color:var(--ok)}
+  .toast.err{border-left-color:var(--err)}
+  @keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  @media (max-width:1180px){
+    aside.inspector.open{width:320px;min-width:320px}
+    aside.jobs-pane{width:250px;min-width:250px}
+  }
 </style>
 </head>
 <body>
+
 <header>
-  <div class="brand"><span class="logo">V</span>VISTA-MCP <small>· Orchestrator Flow</small></div>
-  <div class="live"><span class="beat"></span><span id="liveTxt">live</span></div>
+  <div class="brand"><span class="logo" aria-hidden="true">V</span>VISTA-MCP <small>· Orchestrator Console</small></div>
+  <nav class="viewtabs" role="tablist" aria-label="Views">
+    <button class="viewtab active" data-view="flow" role="tab" aria-selected="true">⛓ Flow</button>
+    <button class="viewtab" data-view="dash" role="tab" aria-selected="false">📈 Dashboard</button>
+    <button class="viewtab" data-view="hist" role="tab" aria-selected="false">🗂 History</button>
+  </nav>
   <div class="spacer"></div>
-  <button id="themeBtn" class="icon" title="Toggle dark mode">🌙</button>
-  <button id="intgBtn">📦 Integrations</button>
-  <button id="pauseBtn">⏸ Pause</button>
-  <button id="cfgBtn" class="primary">⚙ Add / Edit Tools</button>
+  <div class="live" id="liveWrap"><span class="beat"></span><span id="liveTxt">live</span></div>
+  <button class="btn ghost icon" id="pauseBtn" title="Pause live polling" aria-label="Pause live polling">⏸</button>
+  <button class="btn ghost icon" id="themeBtn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+  <button class="btn" id="intgBtn">📦 Integrations</button>
+  <a class="btn link" id="guideBtn" target="_blank" rel="noopener"
+     title="How to use this console (opens in a new tab)">📖 User Guide ↗</a>
+  <a class="btn link" id="apiGuideBtn" target="_blank" rel="noopener"
+     title="The API an analyzer must expose to plug in (opens in a new tab)">🔌 API Integration ↗</a>
+  <button class="btn primary" id="cfgBtn">⚙ Add / Edit Tools</button>
 </header>
 
-<div class="tabbar" id="tabbar"><span class="lbl">Tools</span></div>
-
-<div class="wrap">
-  <aside>
-    <div class="hd"><span>Live Jobs · last 30</span><span class="n" id="jobCount">0</span></div>
-    <div class="jobs" id="jobs"></div>
-  </aside>
-  <main>
-    <div class="detailbar">
-      <div>
-        <div class="title" id="dTitle">Select a tool or a job</div>
-        <div class="sub" id="dSub">Toggle a tool above to preview its flow; the flow animates live as jobs run.</div>
+<!-- =========================== FLOW VIEW =========================== -->
+<section class="view active" id="view-flow">
+  <div class="tabbar" id="tabbar"><span class="lbl">Tools</span></div>
+  <div class="wrap">
+    <aside class="jobs-pane">
+      <div class="pane-hd"><span>Recent jobs</span><span class="n" id="jobCount">0</span></div>
+      <div class="joblist" id="joblist"></div>
+      <div class="pane-hd" style="border-top:1px solid var(--line);border-bottom:0">
+        <span id="dbHint">history</span>
+        <button class="btn sm ghost" id="toHistBtn">open history →</button>
       </div>
-      <div class="metrics" id="dMetrics"></div>
-    </div>
-    <div class="canvas" id="canvas">
-      <svg id="edges"></svg>
-      <div class="flow" id="flow"></div>
-      <div class="empty" id="emptyMsg">Pick a tool tab to preview its flow, or select a running job on the left.</div>
-    </div>
-    <div class="events" id="events"></div>
-  </main>
-</div>
+    </aside>
 
-<!-- Config editor -->
-<div class="modal" id="modal">
-  <div class="sheet">
-    <h2><span class="logo">⚙</span>TOOL_ENABLEMENT — add &amp; edit MCP tools</h2>
-    <div class="hint">This is the ONLY place tools, VISTA analyzers, and prompts are added or changed.
-      Each MCP tool has its analyzers (mandatory always run; optional ones are chosen by DeepSeek),
-      its ORB toggle, its client-facing <b>description</b>, and its own <b>routing system prompt</b> —
-      the custom DeepSeek prompt that decides which optional analyzers to call <i>for this tool</i>.
-      <b>+ add tool</b> creates a brand-new MCP tool (name + endpoints) with no code. Saving validates,
-      writes <span class="pill">config/tool_enablement.json</span>, and hot-reloads the live server.
-      <span class="rawtoggle" id="rawToggle">⟷ raw JSON</span></div>
-    <div id="formView"></div>
-    <div id="rawView" style="display:none"><textarea id="rawEditor" class="mono"></textarea></div>
-    <div class="actions">
+    <main class="flowmain">
+      <div class="detailbar">
+        <div style="min-width:0">
+          <div class="title" id="dTitle">Select a tool or a job</div>
+          <div class="sub" id="dSub">Pick a tool tab to preview its flow; the flow animates live as jobs run.</div>
+        </div>
+        <div class="metrics" id="dMetrics"></div>
+      </div>
+
+      <div class="canvas" id="canvas">
+        <div class="stage" id="stage">
+          <div class="flow" id="flow"><svg id="edges"></svg></div>
+        </div>
+        <div class="canvas-hint" id="canvasHint">drag to pan · scroll to zoom · click a node for details</div>
+        <div class="zoomctl">
+          <button id="zOut" title="Zoom out" aria-label="Zoom out">−</button>
+          <div class="zval" id="zVal">100%</div>
+          <button id="zIn" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="zFit" title="Fit to screen" aria-label="Fit to screen">⤢</button>
+          <button id="zReset" title="Reset zoom (100%)" aria-label="Reset zoom">⌾</button>
+        </div>
+      </div>
+
+      <div class="console" id="console">
+        <div class="cgrip" id="cgrip" title="Drag to resize"></div>
+        <div class="chd">
+          <button class="btn sm ghost icon" id="cToggle" title="Collapse / expand">▾</button>
+          <span class="t">CLI log</span>
+          <span class="pill" id="cCount">0 events</span>
+          <input type="text" id="cFilter" placeholder="filter…" aria-label="Filter log lines" />
+          <select id="cLevel" aria-label="Filter by status">
+            <option value="">all statuses</option>
+            <option value="running">running</option>
+            <option value="ok">ok</option>
+            <option value="skipped">skipped</option>
+            <option value="error">error</option>
+          </select>
+          <label class="sw"><input type="checkbox" id="cAuto" checked /> auto-scroll</label>
+          <label class="sw"><input type="checkbox" id="cVerbose" checked /> verbose</label>
+          <div class="spacer"></div>
+          <button class="btn sm ghost" id="cReport">📄 report</button>
+          <button class="btn sm ghost" id="cCopy">copy</button>
+        </div>
+        <div class="clog" id="clog"></div>
+      </div>
+    </main>
+
+    <aside class="inspector" id="inspector" aria-label="Node inspector">
+      <div class="insp-hd">
+        <div class="ttl" id="inspTitle"><span>Node</span></div>
+        <div class="spacer"></div>
+        <button class="btn sm ghost icon" id="inspClose" aria-label="Close inspector">✕</button>
+      </div>
+      <div class="insp-body" id="inspBody"></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ========================= DASHBOARD VIEW ========================= -->
+<section class="view" id="view-dash">
+  <div class="filterbar">
+    <label>Range</label>
+    <div class="segmented" id="dRange">
+      <button data-h="1">1h</button><button data-h="24" class="active">24h</button>
+      <button data-h="168">7d</button><button data-h="720">30d</button><button data-h="">all</button>
+    </div>
+    <input type="text" id="dQ" placeholder="Search question, file, job id…" aria-label="Search jobs" />
+    <select id="dTool" aria-label="Tool"><option value="">all tools</option></select>
+    <select id="dAnalyzer" aria-label="Analyzer"><option value="">any analyzer</option></select>
+    <select id="dStatus" aria-label="Status">
+      <option value="">any status</option><option value="done">done</option>
+      <option value="error">error</option><option value="running">running</option>
+    </select>
+    <select id="dAi" aria-label="AI Controller">
+      <option value="">AI: any</option><option value="on">AI answered</option>
+      <option value="off">fail-safe / off</option>
+    </select>
+    <select id="dOrb" aria-label="ORB">
+      <option value="">ORB: any</option><option value="on">ORB appended</option>
+      <option value="off">no ORB</option>
+    </select>
+    <div class="spacer" style="flex:1"></div>
+    <span class="pill" id="dStamp"></span>
+    <button class="btn sm ghost" id="dReset">Reset</button>
+    <button class="btn sm" id="dRefresh">↻ Refresh</button>
+  </div>
+  <div class="filtersum" id="dSummary"></div>
+  <div class="scroller" id="dashBody"></div>
+</section>
+
+<!-- ========================== HISTORY VIEW ========================== -->
+<section class="view" id="view-hist">
+  <div class="filterbar">
+    <input type="text" id="hQ" placeholder="Search question, file, job id, tool…" aria-label="Search jobs" />
+    <select id="hTool"><option value="">all tools</option></select>
+    <select id="hStatus">
+      <option value="">any status</option><option value="done">done</option>
+      <option value="error">error</option><option value="running">running</option>
+    </select>
+    <select id="hAnalyzer"><option value="">any analyzer</option></select>
+    <select id="hRange">
+      <option value="">all time</option><option value="1">last hour</option>
+      <option value="24" selected>last 24h</option><option value="168">last 7 days</option>
+      <option value="720">last 30 days</option>
+    </select>
+    <select id="hAi"><option value="">AI: any</option><option value="on">AI used</option>
+      <option value="off">fail-safe / off</option></select>
+    <div class="spacer" style="flex:1"></div>
+    <span class="pill" id="hTotal">0</span>
+    <button class="btn sm" id="hRefresh">↻</button>
+  </div>
+  <div class="scroller" id="histBody" style="padding:0"></div>
+  <div class="pager">
+    <button class="btn sm" id="hPrev">← Newer</button>
+    <button class="btn sm" id="hNext">Older →</button>
+    <span id="hRangeTxt"></span>
+    <div class="spacer" style="flex:1"></div>
+    <label for="hSize" style="font-size:11.5px;color:var(--faint)">rows</label>
+    <select id="hSize" style="background:var(--field);border:1px solid var(--line);border-radius:6px;padding:3px 7px;font-size:12px">
+      <option>25</option><option selected>50</option><option>100</option><option>200</option>
+    </select>
+  </div>
+</section>
+
+<!-- ============================ MODALS ============================ -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Tool configuration">
+  <div class="sheet wide">
+    <div class="sheet-hd">
+      <h2><span class="logo">⚙</span>Tools &amp; Analyzers</h2>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm" id="wizardBtn">＋ New tool</button>
+      <button class="btn sm ghost rawtoggle" id="rawToggle">⟷ Raw JSON</button>
+      <button class="btn sm ghost icon" id="cfgClose" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-bd">
+      <div class="hint">
+        Everything the orchestrator runs is defined here — <b>no code, no restart</b>. Each MCP tool
+        has its client-facing description, its <b>AI Controller routing prompt</b>, an ORB toggle, and
+        its analyzers (<b>mandatory</b> = always called, <b>optional</b> = the AI Controller decides per
+        question). Saving validates the config, writes <code style="font-family:var(--mono)">config/tool_enablement.json</code>,
+        hot-reloads the server and registers/unregisters the MCP tools live.
+        <a id="hintGuide" target="_blank" rel="noopener">Read the User Guide ↗</a>
+      </div>
+      <div id="formView"></div>
+      <div id="rawView" style="display:none">
+        <label class="f">Raw TOOL_ENABLEMENT JSON</label>
+        <textarea id="rawEditor" class="mono" style="min-height:420px"></textarea>
+      </div>
+    </div>
+    <div class="sheet-ft">
       <span class="savemsg" id="saveMsg"></span>
-      <button class="btn-ghost" id="cancelBtn">Cancel</button>
-      <button class="btn-primary" id="saveBtn">Save &amp; reload</button>
+      <button class="btn" id="cancelBtn">Cancel</button>
+      <button class="btn primary" id="saveBtn">Save &amp; reload</button>
     </div>
   </div>
 </div>
 
-<!-- Integrations dashboard -->
-<div class="modal" id="intgModal">
-  <div class="sheet">
-    <h2><span class="logo">📦</span>Completed integrations</h2>
-    <div class="hint">Everything wired into VISTA-MCP right now — each MCP tool and the VISTA
-      analyzers integrated under it. This is a live view of the config; the orchestrator uses
-      exactly this.</div>
-    <div id="intgBody"></div>
-    <div class="actions">
-      <button class="btn-ghost" id="intgClose">Close</button>
-      <button class="btn-primary" id="intgEdit">Edit tools →</button>
+<div class="modal" id="wizModal" role="dialog" aria-modal="true" aria-label="New tool wizard">
+  <div class="sheet narrow">
+    <div class="sheet-hd">
+      <h2><span class="logo">✨</span>New MCP tool</h2>
+      <div class="spacer" style="flex:1"></div>
+      <span class="pill" id="wizStepLbl">Step 1 of 3</span>
+      <button class="btn sm ghost icon" id="wizClose" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-bd" id="wizBody"></div>
+    <div class="sheet-ft">
+      <span class="savemsg" id="wizMsg"></span>
+      <button class="btn" id="wizBack">← Back</button>
+      <button class="btn primary" id="wizNext">Next →</button>
     </div>
   </div>
 </div>
+
+<div class="modal" id="intgModal" role="dialog" aria-modal="true" aria-label="Integrations">
+  <div class="sheet">
+    <div class="sheet-hd">
+      <h2><span class="logo">📦</span>Completed integrations</h2>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm ghost icon" id="intgX" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-bd"><div id="intgBody"></div></div>
+    <div class="sheet-ft">
+      <button class="btn" id="intgClose">Close</button>
+      <button class="btn primary" id="intgEdit">Edit tools →</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="reportModal" role="dialog" aria-modal="true" aria-label="Final report">
+  <div class="sheet">
+    <div class="sheet-hd">
+      <h2><span class="logo">📄</span><span id="repTitle">Final report</span><span class="pill" id="repMeta" style="margin-left:8px"></span></h2>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm ghost" id="repCopy">copy</button>
+      <button class="btn sm ghost icon" id="repX" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-bd"><div class="codebox" id="repBody" style="max-height:none"></div></div>
+    <div class="sheet-ft"><button class="btn primary" id="repClose">Close</button></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
 
 <script>
-const $ = s => document.querySelector(s);
+"use strict";
+/* ==========================================================================
+   VISTA-MCP console
+   Views: Flow (live n8n-style canvas) · Dashboard (analytics) · History (DB)
+   ========================================================================== */
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
 // API base works whether the page is served at /gui or /mcp/gui (prod proxy).
-const API = (() => {
-  let p = location.pathname.replace(/\/+$/,'');   // strip trailing slash
-  p = p.replace(/\/gui$/,'');                      // drop the trailing /gui → mount prefix
-  return p + '/gui/api/';                          // → /gui/api/  or  /mcp/gui/api/
+const GUI_ROOT = (() => {
+  let p = location.pathname.replace(/\/+$/,'');
+  p = p.replace(/\/gui$/,'');
+  return p + '/gui/';                              // -> /gui/  or  /mcp/gui/
 })();
+const API = GUI_ROOT + 'api/';
+// The standalone doc pages live next to the console, under whichever prefix served this page.
+for (const [id, page] of [["guideBtn","user-guide"], ["apiGuideBtn","api-integration-guide"],
+                          ["hintGuide","user-guide"]]) {
+  const el = document.getElementById(id);
+  if (el) el.href = GUI_ROOT + page;
+}
+
 const STATUS_LABEL = {pending:"pending",running:"running",ok:"done",skipped:"skipped",error:"error"};
-let STATE = {tools:{}, jobs:[]};
-let selectedJob = null, selectedTool = null, paused = false;
-
-// ---- theme ----
-(function initTheme(){
-  const saved = localStorage.getItem("vista-theme") || "light";
-  document.documentElement.setAttribute("data-theme", saved);
-})();
-$("#themeBtn").onclick = () => {
-  const cur = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", cur);
-  localStorage.setItem("vista-theme", cur);
-  $("#themeBtn").textContent = cur === "dark" ? "☀️" : "🌙";
-  if(selectedJob) drawEdges(); else if(selectedTool) drawEdges();
+const STEP_HELP = {
+  intake:"The MCP tool call as received, plus the log fetched from the platform-injected source_url.",
+  vfr:"Vetting & Flow Routing — pre-flight file check. Passthrough today; a real seam for future routing logic.",
+  tool_enablement:"This tool's TOOL_ENABLEMENT config: which analyzers exist, which are mandatory, and whether ORB runs.",
+  discover:"GET /discover on every configured analyzer, concurrently. This is where each analyzer's CURRENT API contract comes from.",
+  ai_controller:"The AI Controller. Runs on every job: picks which optional analyzers to add AND plans how to call each analyzer from the contract just discovered.",
+  concat:"Every analyzer's report_markdown joined with a horizontal rule. The orchestrator never re-formats an analyzer's text.",
+  orb:"ORB troubleshooting, asked once at the end with the combined report + the user's question. Fail-open.",
+  done:"The single text report handed back to the MCP client."
 };
-$("#themeBtn").textContent = document.documentElement.getAttribute("data-theme") === "dark" ? "☀️" : "🌙";
 
-// ---- polling ----
+let STATE = {tools:{}, jobs:[], db:{}, server:{}};
+let selectedJob = null, selectedTool = null, paused = false;
+let currentJob = null;            // last loaded job payload
+let currentNodes = [];
+let selectedNodeKey = null;
+let activeView = "flow";
+
+/* ---------------------------- theme ---------------------------- */
+(function initTheme(){
+  // Explicit choice wins; otherwise follow the operating system on first visit.
+  const saved = localStorage.getItem("vista-theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", saved || (prefersDark ? "dark" : "light"));
+})();
+function syncThemeBtn(){
+  const dark = document.documentElement.getAttribute("data-theme")==="dark";
+  $("#themeBtn").textContent = dark ? "☀️" : "🌙";
+  $("#themeBtn").title = dark ? "Switch to light mode" : "Switch to dark mode";
+}
+$("#themeBtn").onclick = () => {
+  const next = document.documentElement.getAttribute("data-theme")==="dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("vista-theme", next);
+  syncThemeBtn(); drawEdges();
+  if(activeView==="dash") renderDash(LAST_ANALYTICS);
+};
+syncThemeBtn();
+
+/* ---------------------------- helpers ---------------------------- */
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function clip(s,n){s=String(s??"");return s.length>n?s.slice(0,n-1)+"…":s;}
+function fmtNum(n){return (n==null||isNaN(n))?"—":Number(n).toLocaleString();}
+function fmtMs(ms){
+  if(ms==null) return "—";
+  if(ms<1000) return ms+"ms";
+  if(ms<60000) return (ms/1000).toFixed(ms<10000?2:1)+"s";
+  return Math.floor(ms/60000)+"m "+Math.round((ms%60000)/1000)+"s";
+}
+function fmtBytes(b){
+  if(!b) return "0 B";
+  const u=["B","KB","MB","GB"]; let i=0,v=b;
+  while(v>=1024&&i<u.length-1){v/=1024;i++;}
+  return v.toFixed(v<10&&i>0?1:0)+" "+u[i];
+}
+function fmtTime(ts){ return ts? new Date(ts*1000).toLocaleTimeString([], {hour12:false}) : "—"; }
+function fmtDateTime(ts){
+  if(!ts) return "—";
+  const d=new Date(ts*1000);
+  return d.toLocaleDateString([], {month:"short",day:"2-digit"})+" "+d.toLocaleTimeString([], {hour12:false});
+}
+function ago(ts){
+  if(!ts) return "";
+  const s=Math.max(0,(Date.now()/1000)-ts);
+  if(s<60) return Math.floor(s)+"s ago";
+  if(s<3600) return Math.floor(s/60)+"m ago";
+  if(s<86400) return Math.floor(s/3600)+"h ago";
+  return Math.floor(s/86400)+"d ago";
+}
+function toast(msg, kind){
+  const el=document.createElement("div");
+  el.className="toast "+(kind||"");
+  el.textContent=msg;
+  $("#toasts").appendChild(el);
+  setTimeout(()=>{el.style.opacity="0";el.style.transition="opacity .25s";setTimeout(()=>el.remove(),260);}, 3200);
+}
+function copyText(t, label){
+  navigator.clipboard.writeText(t).then(()=>toast((label||"Copied")+" to clipboard","ok"))
+    .catch(()=>toast("Copy failed","err"));
+}
+function jsonBox(obj){ return `<div class="codebox">${esc(JSON.stringify(obj,null,2))}</div>`; }
+
+/* ---------------------------- view switching + deep links ----------------------------
+   The console is deep-linkable, so an operator can share a view or a specific job:
+     #flow · #dash · #hist · #job=<job_id> · #tool=<tool name>                          */
+function setView(name, opts){
+  activeView = name;
+  $$(".viewtab").forEach(b=>{
+    const on = b.dataset.view===name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on?"true":"false");
+  });
+  $$(".view").forEach(v=>v.classList.toggle("active", v.id==="view-"+name));
+  if(name==="dash") loadAnalytics();
+  if(name==="hist") loadHistory();
+  if(name==="flow") requestAnimationFrame(()=>{ drawEdges(); fitView(); });
+  if(!(opts&&opts.silent)) writeHash();
+}
+function writeHash(){
+  let h = activeView;
+  if(activeView==="flow"){
+    if(selectedJob) h = "job="+selectedJob + (selectedNodeKey? "&node="+selectedNodeKey : "");
+    else if(selectedTool) h = "tool="+encodeURIComponent(selectedTool);
+  }
+  if(location.hash.slice(1)!==h) history.replaceState(null,"","#"+h);
+}
+async function applyHash(){
+  const h=decodeURIComponent(location.hash.replace(/^#/,""));
+  if(!h) return;
+  if(h==="dash"||h==="hist"||h==="flow"){ setView(h,{silent:true}); return; }
+  // shareable entry points for the panels
+  if(h==="guide"){ window.open(GUI_ROOT+"user-guide", "_blank", "noopener"); return; }
+  if(h==="tools"){ openConfig(); return; }
+  if(h==="integrations"){ renderIntegrations(); $("#intgModal").classList.add("show"); return; }
+  if(h.startsWith("job=")){
+    const [jid, nodeKey] = h.slice(4).split("&node=");
+    selectedJob=jid; selectedTool=null;
+    if(nodeKey) selectedNodeKey=nodeKey;
+    setView("flow",{silent:true});
+    await loadJob(selectedJob); renderTabs(); renderJobList();
+    if(nodeKey){ showInspector(nodeKey); markActiveNode(); }
+    return;
+  }
+  if(h.startsWith("tool=")){ selectedTool=h.slice(5); selectedJob=null;
+    setView("flow",{silent:true}); renderTabs(); renderTemplate(selectedTool); }
+}
+window.addEventListener("hashchange", applyHash);
+$$(".viewtab").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$("#toHistBtn").onclick=()=>setView("hist");
+
+/* ---------------------------- polling ---------------------------- */
 async function poll(){
   if(paused) return;
   try{
     STATE = await (await fetch(API+"state?limit=30")).json();
-    renderTabs(); renderJobs();
-    if(selectedJob) await loadJob(selectedJob, true);
+    renderTabs(); renderJobList(); renderDbHint(); fillToolSelects();
+    if(selectedJob){
+      // A finished job can never change again — re-fetching it would only rebuild the DOM and
+      // close whatever the operator has open (folds, expanded log lines, scroll position).
+      const cur = currentJob && currentJob.summary;
+      const stale = !cur || cur.job_id!==selectedJob || cur.status==="running";
+      if(stale) await loadJob(selectedJob, true);
+    }
     else if(selectedTool) renderTemplate(selectedTool);
-    $("#liveTxt").textContent = "live · " + new Date().toLocaleTimeString();
-  }catch(e){ $("#liveTxt").textContent = "reconnecting…"; }
+    $("#liveTxt").textContent = "live · " + new Date().toLocaleTimeString([], {hour12:false});
+    $("#liveWrap").classList.remove("stale");
+  }catch(e){
+    $("#liveTxt").textContent = "reconnecting…";
+    $("#liveWrap").classList.add("stale");
+  }
 }
-setInterval(poll, 1500);
+setInterval(()=>{ if(activeView==="flow"||!paused) poll(); }, 1500);
+$("#pauseBtn").onclick=()=>{
+  paused=!paused;
+  $("#pauseBtn").textContent = paused ? "▶" : "⏸";
+  $("#pauseBtn").title = paused ? "Resume live polling" : "Pause live polling";
+  $("#liveWrap").classList.toggle("off", paused);
+  $("#liveTxt").textContent = paused ? "paused" : "live";
+  if(!paused) poll();
+};
 
-// ---- tool tabs ----
+function renderDbHint(){
+  const db = STATE.db||{};
+  const el = $("#dbHint");
+  if(!db.enabled){ el.innerHTML = `<span title="Set DATABASE_URL to keep history">history: off</span>`; return; }
+  if(!db.connected){ el.innerHTML = `<span style="color:var(--err)" title="${esc(db.last_error||"")}">history: db error</span>`; return; }
+  el.innerHTML = `<span title="${esc(db.url||"")}">history: <b style="color:var(--ok)">on</b>`
+    + (db.queued? ` · ${db.queued} queued`:"") + `</span>`;
+}
+
+/* ---------------------------- tool tabs ---------------------------- */
 function renderTabs(){
   const names = Object.keys(STATE.tools||{});
   if(!selectedTool && !selectedJob && names.length) selectedTool = names[0];
@@ -309,75 +925,121 @@ function renderTabs(){
     const t=document.createElement("button");
     t.className="tab"+(n===selectedTool&&!selectedJob?" active":"");
     t.innerHTML=`🧩 ${esc(n)}${counts[n]?`<span class="cnt">${counts[n]}</span>`:""}`;
-    t.onclick=()=>{ selectedTool=n; selectedJob=null; renderTemplate(n); renderTabs(); renderJobs(); };
+    t.onclick=()=>{ selectedTool=n; selectedJob=null; selectedNodeKey=null; closeInspector();
+      renderTemplate(n); renderTabs(); renderJobList(); writeHash(); };
     bar.appendChild(t);
   });
   const add=document.createElement("button");
-  add.className="tab addtool"; add.textContent="＋ add tool"; add.onclick=()=>openConfig(true);
+  add.className="tab addtool"; add.textContent="＋ add tool";
+  add.onclick=()=>openWizard();
   bar.appendChild(add);
 }
 
-// ---- jobs sidebar ----
-function renderJobs(){
-  const el=$("#jobs"), jobs=STATE.jobs||[];
+/* ---------------------------- live job list ---------------------------- */
+function renderJobList(){
+  const el=$("#joblist"), jobs=STATE.jobs||[];
   $("#jobCount").textContent=jobs.length;
+  if(!jobs.length){
+    el.innerHTML=`<div class="empty"><span class="big">🛰</span>No live jobs yet.<br>
+      <span style="font-size:12px">Run a tool call — it appears here instantly.</span></div>`;
+    return;
+  }
+  const total = STATE.jobs_total || jobs.length;
   el.innerHTML = jobs.map(j=>{
     const sel=j.job_id===selectedJob?" sel":"";
     const sc=j.status==="running"?"running":(j.status==="error"?"error":"done");
     const sa=(j.selected_analyzers||[]).join(", ");
-    return `<div class="job${sel}" data-id="${j.job_id}">
-      <div class="row1"><span class="chip ${sc}">${j.status}</span><span class="tool">${esc(j.tool_name)}</span></div>
+    return `<div class="job${sel}" data-id="${esc(j.job_id)}" tabindex="0" role="button">
+      <div class="row1"><span class="chip ${sc}">${esc(j.status)}</span>
+        <span class="tool">${esc(j.tool_name)}</span></div>
       <div class="q">${esc(j.question||"(no question)")}</div>
-      <div class="row2"><span class="pill">${j.job_id.slice(0,8)}</span>${sa?`<span>→ ${esc(sa)}</span>`:""}
+      <div class="row2"><span class="pill">${esc(j.job_id.slice(0,8))}</span>
+        ${sa?`<span>→ ${esc(clip(sa,26))}</span>`:""}
+        <span title="${esc(fmtDateTime(j.started_at))}">${esc(ago(j.started_at))}</span>
         <span style="margin-left:auto">${j.duration_s!=null?j.duration_s+"s":"…"}</span></div></div>`;
-  }).join("") || `<div class="empty" style="position:static;padding:32px">No jobs yet.<br>Run a tool call.</div>`;
-  el.querySelectorAll(".job").forEach(n=>n.onclick=()=>{selectedJob=n.dataset.id;selectedTool=null;loadJob(selectedJob);renderTabs();});
+  }).join("")
+  // Scroll to the bottom of the list and you land on the way into the full record.
+  + `<div class="joblist-end">
+       <div class="t">${jobs.length} most recent${total>jobs.length?` · ${fmtNum(total)} jobs stored`:""}</div>
+       <button class="btn sm" id="endHistBtn">🗂 Open full History →</button></div>`;
+  const eh=$("#endHistBtn"); if(eh) eh.onclick=()=>setView("hist");
+  el.querySelectorAll(".job").forEach(n=>{
+    const open=()=>{ selectedJob=n.dataset.id; selectedTool=null; selectedNodeKey=null;
+      loadJob(selectedJob); renderTabs(); renderJobList(); };
+    n.onclick=()=>{ open(); writeHash(); };
+    n.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); writeHash(); } };
+  });
 }
 
 async function loadJob(id, quiet){
   try{
-    const r=await fetch(API+"jobs/"+encodeURIComponent(id)); if(!r.ok) return;
-    const d=await r.json(); renderFlow(d.nodes,d.summary); renderEvents(d.events); renderJobs();
+    const r=await fetch(API+"jobs/"+encodeURIComponent(id));
+    if(!r.ok){ if(!quiet) toast("Job not found","err"); return; }
+    const d=await r.json();
+    currentJob=d; currentNodes=d.nodes||[];
+    renderFlow(d.nodes, d.summary);
+    renderConsole(d.events||[]);
+    if(selectedNodeKey) showInspector(selectedNodeKey);
+    if(activeView!=="flow" && !quiet) setView("flow");
   }catch(e){ if(!quiet) console.error(e); }
 }
 
-// ---- tool template (static shape) ----
+/* ---------------------------- tool template (static shape) ---------------------------- */
 function renderTemplate(tool){
   const t=STATE.tools[tool]; if(!t) return;
+  currentJob=null;
   const nodes=[
     N("intake","📥","Tool Call & Fetch","source_url (injected) + question → fetch log"),
-    N("vfr","🧭","VFR (routing)"),
-    N("tool_enablement","⚙️","Tool Enablement"),
-    N("discover","🔎","Discover Tools"),
-    N("decide","🧠","DeepSeek Decision", t.routing_system_prompt?clip(t.routing_system_prompt,120):""),
+    N("vfr","🧭","VFR (routing)","pre-flight file check"),
+    N("tool_enablement","⚙️","Tool Enablement",
+      `${(t.analyzers||[]).filter(a=>a.mandatory&&a.enabled).length} mandatory · `+
+      `${(t.analyzers||[]).filter(a=>!a.mandatory&&a.enabled).length} optional`),
+    N("discover","🔎","Discover Tools","GET /discover on every analyzer (concurrent)"),
+    N("ai_controller","🧠","AI Controller",
+      t.routing_system_prompt?clip(t.routing_system_prompt,110):"default routing prompt · always runs"),
   ];
-  (t.analyzers||[]).forEach(a=>nodes.push({...N("analyze:"+a.id,"📊","Analyzer · "+a.id),
-    parallel:true, tag:a.mandatory?"mand":"opt", detail:(a.enabled?"":"(disabled) ")+a.api_url}));
-  nodes.push(N("concat","🧩","Concatenate"));
-  if(t.orb_enabled) nodes.push(N("orb","🛟","ORB Suggestions"));
-  nodes.push(N("done","✅","Answer & Back"));
+  (t.analyzers||[]).forEach(a=>nodes.push({...N("analyze:"+a.id,"📊","Analyzer · "+(a.title||a.id)),
+    parallel:true, tag:a.mandatory?"mand":"opt",
+    detail:(a.enabled?"":"(disabled) ")+a.api_url, analyzer:{
+      analyzer_id:a.id, title:a.title, api_url:a.api_url, mandatory:a.mandatory}}));
+  nodes.push(N("concat","🧩","Concatenate","join every report_markdown"));
+  if(t.orb_enabled) nodes.push(N("orb","🛟","ORB Suggestions","troubleshooting, appended once"));
+  nodes.push(N("done","✅","Answer & Back","one text report to the MCP client"));
+  currentNodes=nodes;
   renderFlow(nodes,null);
-  $("#events").innerHTML=`<div class="ev">Template preview of <span class="k">${esc(tool)}</span> — `+
-    `mandatory analyzers always run; optional ones are chosen by this tool's DeepSeek routing prompt.</div>`;
-  $("#dTitle").textContent=tool+" · template";
-  $("#dSub").textContent=t.description?clip(t.description,120):"";
-  $("#dMetrics").innerHTML=`<span>analyzers <b>${(t.analyzers||[]).length}</b></span>`+
-    `<span>ORB <b>${t.orb_enabled?"on":"off"}</b></span>`+
-    `<span>routing prompt <b>${t.routing_system_prompt?"custom":"default"}</b></span>`;
+  $("#clog").innerHTML=`<div class="ev"><span class="k">[template]</span> preview of `+
+    `<b>${esc(tool)}</b> — mandatory analyzers always run; optional ones are chosen by this tool's `+
+    `AI Controller routing prompt, which also plans every request from live discovery.</div>`;
+  $("#cCount").textContent="template";
+  $("#dTitle").innerHTML=`${esc(tool)} <span class="chip neutral">template</span>`;
+  $("#dSub").textContent=t.description?clip(t.description,140):"(no description set)";
+  $("#dMetrics").innerHTML=
+     metric("analyzers", (t.analyzers||[]).length)
+   + metric("mandatory", (t.analyzers||[]).filter(a=>a.mandatory).length)
+   + metric("ORB", t.orb_enabled?"on":"off")
+   + metric("routing prompt", t.routing_system_prompt?"custom":"default");
 }
-function N(key,icon,label,detail){return {key,icon,label,status:"pending",detail:detail||"",elapsed_ms:null,parallel:false};}
+function N(key,icon,label,detail){
+  return {key,icon,label,status:"pending",detail:detail||"",elapsed_ms:null,parallel:false,data:{}};
+}
+function metric(l,v){ return `<span class="metric">${esc(l)} <b>${esc(String(v))}</b></span>`; }
 
-// ---- flow rendering ----
+/* ---------------------------- flow rendering ---------------------------- */
+let lastFlowKey="";
 function renderFlow(nodes,summary){
-  $("#emptyMsg").style.display=nodes.length?"none":"block";
   if(summary){
-    $("#dTitle").textContent=summary.tool_name;
+    const st=summary.status==="running"?"running":(summary.status==="error"?"error":"done");
+    $("#dTitle").innerHTML=`${esc(summary.tool_name)} <span class="chip ${st}">${esc(summary.status)}</span>`
+      + (summary.live===false?` <span class="chip neutral" title="loaded from the database">stored</span>`:"");
     $("#dSub").textContent=summary.question||"(no question)";
-    const m=[`<span>status <b>${summary.status}</b></span>`];
-    if(summary.duration_s!=null)m.push(`<span>time <b>${summary.duration_s}s</b></span>`);
-    if(summary.selected_analyzers?.length)m.push(`<span>ran <b>${esc(summary.selected_analyzers.join(", "))}</b></span>`);
-    m.push(`<span>ORB <b>${summary.orb_enabled?"on":"off"}</b></span>`);
-    if(summary.report_chars)m.push(`<span>report <b>${summary.report_chars.toLocaleString()}</b> ch</span>`);
+    const m=[];
+    m.push(metric("job", summary.job_id.slice(0,8)));
+    if(summary.duration_s!=null) m.push(metric("time", summary.duration_s+"s"));
+    if(summary.filename) m.push(metric("file", clip(summary.filename,22)+(summary.file_bytes?` · ${fmtBytes(summary.file_bytes)}`:"")));
+    if(summary.selected_analyzers?.length) m.push(metric("ran", summary.selected_analyzers.join(", ")));
+    m.push(metric("AI plan", summary.used_ai ? (summary.ai_plan_source||"ai") : "fail-safe"));
+    m.push(metric("ORB", summary.orb_status||(summary.orb_enabled?"on":"off")));
+    if(summary.report_chars) m.push(metric("report", fmtNum(summary.report_chars)+" ch"));
     $("#dMetrics").innerHTML=m.join("");
   }
   const cols=[]; let i=0;
@@ -385,154 +1047,939 @@ function renderFlow(nodes,summary){
     if(nodes[i].parallel){const g=[];while(i<nodes.length&&nodes[i].parallel)g.push(nodes[i++]);cols.push({parallel:true,nodes:g});}
     else cols.push({parallel:false,nodes:[nodes[i++]]});
   }
-  $("#flow").innerHTML=cols.map(c=>{
-    const lbl=c.parallel?`<span class="collabel">parallel</span>`:"";
+  const flow=$("#flow");
+  flow.innerHTML=`<svg id="edges"></svg>`+cols.map(c=>{
+    const lbl=c.parallel&&c.nodes.length>1?`<span class="collabel">parallel</span>`:"";
     return `<div class="col">${lbl}${c.nodes.map(nodeHtml).join("")}</div>`;
   }).join("");
-  requestAnimationFrame(drawEdges);
+  flow.querySelectorAll(".node").forEach(n=>{
+    const open=()=>{ selectedNodeKey=n.dataset.key; showInspector(selectedNodeKey); markActiveNode();
+      if(selectedJob) writeHash(); };
+    n.onclick=open;
+    n.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } };
+  });
+  markActiveNode();
+  const key=nodes.map(n=>n.key).join("|");
+  requestAnimationFrame(()=>{ drawEdges(); if(key!==lastFlowKey){ lastFlowKey=key; fitView(); } });
 }
 function nodeHtml(n){
   const st=n.status||"pending";
   const tag=n.tag?`<span class="tag ${n.tag}">${n.tag==="mand"?"mandatory":"optional"}</span>`:"";
-  const ms=n.elapsed_ms!=null?`${n.elapsed_ms}ms`:"";
-  return `<div class="node ${st}" data-key="${esc(n.key)}"><span class="bar"></span>${tag}
-    <div class="nhd"><span class="ico">${n.icon||"•"}</span>${esc(n.label)}</div>
-    ${n.detail?`<div class="det">${esc(clip(n.detail,150))}</div>`:""}
+  const ms=n.elapsed_ms!=null?fmtMs(n.elapsed_ms):"";
+  return `<div class="node ${st}" data-key="${esc(n.key)}" tabindex="0" role="button"
+      title="Click for details"><span class="bar"></span>${tag}
+    <div class="nhd"><span class="ico">${n.icon||"•"}</span><span class="txt">${esc(n.label)}</span></div>
+    ${n.detail?`<div class="det">${esc(clip(n.detail,170))}</div>`:""}
     <div class="foot"><span class="st">${STATUS_LABEL[st]||st}</span><span class="ms">${ms}</span></div></div>`;
 }
+function markActiveNode(){
+  $$("#flow .node").forEach(n=>n.classList.toggle("active", n.dataset.key===selectedNodeKey));
+}
+function posIn(el, root){
+  let x=0,y=0,n=el;
+  while(n && n!==root){ x+=n.offsetLeft; y+=n.offsetTop; n=n.offsetParent; }
+  return {x,y,w:el.offsetWidth,h:el.offsetHeight};
+}
 function drawEdges(){
-  const svg=$("#edges"),canvas=$("#canvas"),cr=canvas.getBoundingClientRect();
-  const ox=canvas.scrollLeft-cr.left, oy=canvas.scrollTop-cr.top;
-  const cols=[...$("#flow").querySelectorAll(".col")]; let paths="";
+  const flow=$("#flow"), svg=$("#edges");
+  if(!flow||!svg) return;
+  const cols=[...flow.querySelectorAll(".col")];
   const cs=getComputedStyle(document.documentElement);
-  const RED=cs.getPropertyValue('--red').trim()||"#e11d2a", ERR=cs.getPropertyValue('--err').trim()||"#c81e1e";
-  const LINE=cs.getPropertyValue('--edgeline').trim()||"#c6cbd3", IDLE=cs.getPropertyValue('--edgeidle').trim()||"#dfe2e7";
+  const RED=cs.getPropertyValue('--red').trim(), ERR=cs.getPropertyValue('--err').trim();
+  const LINE=cs.getPropertyValue('--edgeline').trim(), IDLE=cs.getPropertyValue('--edgeidle').trim();
+  let paths="";
   for(let c=0;c<cols.length-1;c++){
     const A=[...cols[c].querySelectorAll(".node")], B=[...cols[c+1].querySelectorAll(".node")];
     A.forEach(a=>B.forEach(b=>{
-      const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
-      const x1=ar.right+ox,y1=ar.top+oy+ar.height/2,x2=br.left+ox,y2=br.top+oy+br.height/2,mx=(x1+x2)/2;
-      const run=b.classList.contains("running"),err=b.classList.contains("error");
+      const ar=posIn(a,flow), br=posIn(b,flow);
+      const x1=ar.x+ar.w, y1=ar.y+ar.h/2, x2=br.x, y2=br.y+br.h/2, mx=(x1+x2)/2;
+      const run=b.classList.contains("running"), err=b.classList.contains("error");
       const done=b.classList.contains("ok")||b.classList.contains("skipped");
-      const col=run?RED:err?ERR:done?LINE:IDLE, w=run?2.6:1.6;
-      paths+=`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="${w}" ${run?'stroke-dasharray="5 5"':''}>`+
-        (run?`<animate attributeName="stroke-dashoffset" from="10" to="0" dur="0.55s" repeatCount="indefinite"/>`:"")+`</path>`;
+      const col=run?RED:err?ERR:done?LINE:IDLE, w=run?2.4:1.5;
+      paths+=`<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}"
+        stroke-width="${w}" ${run?'stroke-dasharray="5 5"':''}>`
+        +(run?`<animate attributeName="stroke-dashoffset" from="10" to="0" dur="0.55s" repeatCount="indefinite"/>`:"")
+        +`</path>`;
     }));
   }
-  const fr=$("#flow").getBoundingClientRect();
-  svg.setAttribute("width",fr.width+140); svg.setAttribute("height",Math.max(fr.height+80,canvas.clientHeight));
+  svg.setAttribute("width", flow.scrollWidth);
+  svg.setAttribute("height", flow.scrollHeight);
   svg.innerHTML=paths;
 }
-window.addEventListener("resize",drawEdges);
-$("#canvas").addEventListener("scroll",drawEdges);
-function renderEvents(events){
-  const el=$("#events");
-  el.innerHTML=(events||[]).map(e=>{
-    const ms=e.elapsed_ms!=null?` (${e.elapsed_ms}ms)`:"";
-    return `<div class="ev ${e.status}"><span class="k">[${esc(e.step)}]</span> ${esc(e.status)}${ms} ${esc(e.detail||"")}</div>`;
-  }).join(""); el.scrollTop=el.scrollHeight;
+window.addEventListener("resize", ()=>{ drawEdges(); });
+
+/* ---------------------------- pan + zoom ---------------------------- */
+let zoom={k:1,x:0,y:0};
+function applyZoom(){
+  $("#stage").style.transform=`translate(${zoom.x}px,${zoom.y}px) scale(${zoom.k})`;
+  $("#zVal").textContent=Math.round(zoom.k*100)+"%";
+  const c=$("#canvas");
+  c.style.backgroundSize=(22*zoom.k)+"px "+(22*zoom.k)+"px";
+  c.style.backgroundPosition=zoom.x+"px "+zoom.y+"px";
+}
+function setZoom(k, cx, cy){
+  const nk=Math.max(.25, Math.min(2.5, k));
+  const c=$("#canvas").getBoundingClientRect();
+  cx = cx==null ? c.width/2 : cx; cy = cy==null ? c.height/2 : cy;
+  zoom.x = cx - (cx - zoom.x) * (nk/zoom.k);
+  zoom.y = cy - (cy - zoom.y) * (nk/zoom.k);
+  zoom.k = nk; applyZoom();
+}
+function fitView(){
+  const flow=$("#flow"), c=$("#canvas");
+  if(!flow||!c||!flow.scrollWidth) return;
+  const cw=c.clientWidth, ch=c.clientHeight;
+  // Fit the whole flow when it comfortably fits, but never shrink below 0.62 — past that the
+  // node text stops being readable and panning is the better answer.
+  const raw=Math.min((cw-16)/flow.scrollWidth, (ch-16)/flow.scrollHeight);
+  const k=Math.max(.5, Math.min(1, raw));
+  zoom.k=k;
+  const fw=flow.scrollWidth*k, fh=flow.scrollHeight*k;
+  zoom.x = fw<=cw ? (cw-fw)/2 : 8;      // centre if it fits, else start at the left edge
+  zoom.y = fh<=ch ? (ch-fh)/2 : 8;
+  applyZoom();
+}
+(function initPanZoom(){
+  const c=$("#canvas");
+  let dragging=false, sx=0, sy=0, ox=0, oy=0, moved=false;
+  c.addEventListener("mousedown", e=>{
+    if(e.target.closest(".zoomctl")) return;
+    dragging=true; moved=false; sx=e.clientX; sy=e.clientY; ox=zoom.x; oy=zoom.y;
+    c.classList.add("grabbing");
+  });
+  window.addEventListener("mousemove", e=>{
+    if(!dragging) return;
+    const dx=e.clientX-sx, dy=e.clientY-sy;
+    if(Math.abs(dx)+Math.abs(dy)>3) moved=true;
+    zoom.x=ox+dx; zoom.y=oy+dy; applyZoom();
+  });
+  window.addEventListener("mouseup", ()=>{ dragging=false; c.classList.remove("grabbing"); });
+  c.addEventListener("wheel", e=>{
+    e.preventDefault();
+    const r=c.getBoundingClientRect();
+    const factor = e.deltaY<0 ? 1.12 : 1/1.12;
+    setZoom(zoom.k*factor, e.clientX-r.left, e.clientY-r.top);
+  }, {passive:false});
+  c.addEventListener("dblclick", e=>{ if(!e.target.closest(".node")) fitView(); });
+  $("#zIn").onclick=()=>setZoom(zoom.k*1.2);
+  $("#zOut").onclick=()=>setZoom(zoom.k/1.2);
+  $("#zFit").onclick=fitView;
+  $("#zReset").onclick=()=>{ zoom={k:1,x:24,y:24}; applyZoom(); };
+  applyZoom();
+})();
+
+/* ---------------------------- node inspector ---------------------------- */
+function closeInspector(){
+  $("#inspector").classList.remove("open"); selectedNodeKey=null; markActiveNode();
+  setTimeout(()=>{ drawEdges(); fitView(); }, 180);   // the canvas just got wider
+}
+$("#inspClose").onclick=closeInspector;
+
+let _inspSig="";
+function showInspector(key){
+  const node=(currentNodes||[]).find(n=>n.key===key);
+  if(!node) return;
+  const insp=$("#inspector");
+  const wasOpen=insp.classList.contains("open");
+  insp.classList.add("open");
+  if(!wasOpen) setTimeout(()=>{ drawEdges(); fitView(); }, 180);   // the canvas just got narrower
+  $("#inspTitle").innerHTML=`<span>${node.icon||"•"}</span><span>${esc(node.label)}</span>`;
+  const st=node.status||"pending";
+  const d=node.data||{};
+  let html = `<dl class="kv">
+    <dt>Step</dt><dd><code style="font-family:var(--mono)">${esc(node.key)}</code></dd>
+    <dt>Status</dt><dd><span class="chip ${st==="ok"?"done":st}">${esc(STATUS_LABEL[st]||st)}</span></dd>
+    <dt>Duration</dt><dd>${node.elapsed_ms!=null?fmtMs(node.elapsed_ms):"—"}</dd>
+  </dl>`;
+  const help=STEP_HELP[node.key.split(":")[0]];
+  if(help) html += `<div class="guide"><div class="note">${esc(help)}</div></div>`;
+  if(node.detail) html += `<div class="sect">What happened</div><div class="codebox">${esc(node.detail)}</div>`;
+
+  if(node.key==="ai_controller"){
+    html += aiControllerPanel(d);
+  } else if(node.key.startsWith("analyze:")){
+    html += analyzerPanel(node, d);
+  } else if(node.key==="discover"){
+    if(d.contracts) { html += `<div class="sect">Discovered contracts</div><table class="tblmini">`+
+      Object.entries(d.contracts).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join("")
+      +`</table>`; }
+    if((d.dropped||[]).length) html += `<div class="notebox"><b>dropped</b>${esc(d.dropped.join(", "))}
+      — these analyzers did not answer /discover and were skipped for this run.</div>`;
+  } else if(node.key==="done" && currentJob?.report_markdown){
+    html += `<div class="sect">Final report</div>
+      <button class="btn sm" onclick="openReport()">📄 Open full report (${fmtNum(currentJob.report_markdown.length)} chars)</button>
+      <div style="height:12px"></div>`;
+  }
+
+  const extra = Object.keys(d).filter(k=>!["plans","system_prompt","ai_raw","plan","contracts"].includes(k));
+  if(extra.length){
+    const obj={}; extra.forEach(k=>obj[k]=d[k]);
+    html += fold(key, "Raw step data", JSON.stringify(obj,null,2));
+  }
+
+  // Re-render ONLY when the content actually changed, and carry the operator's state across:
+  // which folds are open and where the panel is scrolled. This is what keeps an expanded
+  // "Live discovery document" open while a job is still streaming events.
+  const sig = key + "::" + html;
+  if(sig === _inspSig) return;
+  const body = $("#inspBody");
+  const openFolds = {};
+  body.querySelectorAll("details.fold[data-fold]").forEach(dd => openFolds[dd.dataset.fold] = dd.open);
+  const scroll = body.scrollTop;
+  body.innerHTML = html;
+  body.querySelectorAll("details.fold[data-fold]").forEach(dd => {
+    if(openFolds[dd.dataset.fold]) dd.open = true;
+  });
+  body.scrollTop = scroll;
+  wirePopButtons(body);
+  _inspSig = sig;
 }
 
-// ---- integrations dashboard ----
+/* --- collapsible block + "open in a window" -------------------------------------------------
+   Every long payload (discovery documents, prompts, raw answers, reports) is both foldable
+   inline and openable as a standalone window that stays put. Ids are derived from the node key
+   and title so they are stable across re-renders. */
+let BLOBS = {};
+function blobId(key, title){
+  return "b_" + (key + "_" + title).replace(/[^A-Za-z0-9]+/g, "_").slice(0, 60);
+}
+function fold(key, title, text, opts){
+  const id = blobId(key, title);
+  BLOBS[id] = {title, text};
+  const o = opts || {};
+  return `<details class="fold" data-fold="${esc(id)}"${o.open?" open":""}>
+    <summary><span class="fsum">${esc(title)}</span>
+      <button class="popbtn" data-pop="${esc(id)}" title="Open in a window">⤢</button></summary>
+    <div class="codebox">${esc(text)}</div></details>`;
+}
+function wirePopButtons(root){
+  root.querySelectorAll(".popbtn").forEach(b => b.onclick = ev => {
+    ev.preventDefault(); ev.stopPropagation();          // don't toggle the <details>
+    const blob = BLOBS[b.dataset.pop];
+    if(blob) openTextModal(blob.title, blob.text);
+  });
+}
+
+function aiControllerPanel(d){
+  const s=(currentJob&&currentJob.summary)||{};
+  let html = `<div class="sect">Decision</div><table class="tblmini">
+    <tr><td>mode</td><td>${esc(d.mode||s.ai_mode||"—")} ${d.mode==="plan-only"?
+      '<span class="chip neutral" title="No optional analyzers to choose from — the controller still read the live contracts and planned every call">plan only</span>':''}</td></tr>
+    <tr><td>AI answered</td><td>${(d.used_ai??s.used_ai)?'<span class="chip done">yes</span>':
+      '<span class="chip skipped">no — fail-safe</span>'}</td></tr>
+    <tr><td>plan source</td><td>${esc(d.plan_source||s.ai_plan_source||"—")}</td></tr>
+    <tr><td>selected</td><td class="mono">${esc((d.selected||s.selected_analyzers||[]).join(", ")||"—")}</td></tr>
+  </table>`;
+  const plans=d.plans||{};
+  const ids=Object.keys(plans);
+  if(ids.length){
+    html += `<div class="sect">Planned calls (from live discovery)</div>`;
+    ids.forEach(id=>{
+      const p=plans[id];
+      html += `<div class="an-card" style="margin-bottom:8px">
+        <div class="ah"><span class="idf">${esc(id)}</span>
+          <span class="chip ${p.source==="ai"?"info":(p.source==="deterministic"?"neutral":"skipped")}">${esc(p.source)}</span></div>
+        <table class="tblmini" style="margin:0">
+          <tr><td>request</td><td class="mono">${esc(p.method)} ${esc(p.url)}</td></tr>
+          <tr><td>file → param</td><td class="mono">${esc(p.file_param||"—")}</td></tr>
+          <tr><td>fields</td><td class="mono">${esc(Object.keys(p.fields||{}).join(", ")||"—")}</td></tr>
+          ${p.ai_note?`<tr><td>note</td><td>${esc(p.ai_note)}</td></tr>`:""}
+        </table>
+        ${(p.notes||[]).length?`<div class="notebox" style="margin:8px 0 0"><b>validated / corrected</b>
+          ${p.notes.map(n=>esc(n)).join("<br>")}</div>`:""}
+      </div>`;
+    });
+  }
+  const sp=d.system_prompt||s.ai_system_prompt;
+  if(sp) html += fold("ai_controller", "Routing system prompt (per tool + fixed output contract)", sp);
+  const raw=d.ai_raw||s.ai_raw;
+  if(raw) html += fold("ai_controller", "Raw AI answer", raw);
+  return html;
+}
+
+function analyzerPanel(node, d){
+  const aid=node.key.split(":")[1];
+  const a=(currentJob?.analyzers||[]).find(x=>x.analyzer_id===aid) || node.analyzer || {};
+  const p=a.plan||d.plan||{};
+  let html=`<div class="sect">Analyzer</div><table class="tblmini">
+    <tr><td>id</td><td class="mono">${esc(a.analyzer_id||aid)}</td></tr>
+    <tr><td>title</td><td>${esc(a.title||"—")}</td></tr>
+    <tr><td>role</td><td>${a.mandatory?'<span class="arole mand">mandatory</span>':'<span class="arole opt">optional</span>'}</td></tr>
+    <tr><td>base url</td><td class="mono">${esc(a.api_url||"—")}</td></tr>
+    ${a.http_status!=null?`<tr><td>http</td><td>${esc(String(a.http_status))}</td></tr>`:""}
+    ${a.report_chars?`<tr><td>report</td><td>${fmtNum(a.report_chars)} chars</td></tr>`:""}
+  </table>`;
+  if(p && p.url){
+    html+=`<div class="sect">Request sent</div><table class="tblmini">
+      <tr><td>method / url</td><td class="mono">${esc(p.method||"")} ${esc(p.url||"")}</td></tr>
+      <tr><td>content type</td><td class="mono">${esc(p.content_type||"")}</td></tr>
+      <tr><td>file → param</td><td class="mono">${esc(p.file_param||"—")}</td></tr>
+      <tr><td>fields</td><td class="mono">${esc(Object.entries(p.fields||{}).map(([k,v])=>k+"="+clip(v,40)).join("  ")||"—")}</td></tr>
+      <tr><td>plan source</td><td><span class="chip ${p.source==="ai"?"info":(p.source==="deterministic"?"neutral":"skipped")}">${esc(p.source||"")}</span></td></tr>
+    </table>`;
+    if((p.notes||[]).length) html+=`<div class="notebox"><b>plan validated against discovery</b>
+      ${p.notes.map(n=>esc(n)).join("<br>")}</div>`;
+  }
+  const k=node.key;
+  if(a.when_to_use) html+=fold(k, "when_to_use (what the AI Controller read)", a.when_to_use);
+  if(a.discovery && Object.keys(a.discovery).length)
+    html+=fold(k, "Live discovery document", JSON.stringify(a.discovery,null,2));
+  if(a.meta && Object.keys(a.meta).length)
+    html+=fold(k, "Result meta", JSON.stringify(a.meta,null,2));
+  if(a.report_markdown)
+    html+=fold(k, `This analyzer's report (${fmtNum(a.report_chars||a.report_markdown.length)} chars)`,
+               a.report_markdown);
+  if(a.error) html+=`<div class="notebox" style="background:var(--err-soft);border-color:rgba(200,30,30,.35);color:var(--err)">
+    <b>error</b>${esc(a.error)}</div>`;
+  return html;
+}
+
+/* ---------------------------- console (CLI log) ---------------------------- */
+let CONSOLE_EVENTS=[], _logSig="";
+function renderConsole(events){
+  CONSOLE_EVENTS=events||[];
+  paintConsole();
+}
+function paintConsole(){
+  const el=$("#clog");
+  const filter=($("#cFilter").value||"").toLowerCase();
+  const level=$("#cLevel").value;
+  const verbose=$("#cVerbose").checked;
+  const rows=CONSOLE_EVENTS.filter(e=>{
+    if(level && e.status!==level) return false;
+    if(!filter) return true;
+    return (e.step+" "+e.status+" "+(e.detail||"")+" "+JSON.stringify(e.data||{})).toLowerCase().includes(filter);
+  });
+  $("#cCount").textContent=`${rows.length}/${CONSOLE_EVENTS.length} events`;
+  if(!rows.length){
+    el.innerHTML=`<div class="ev" style="color:var(--faint)">no events${filter||level?" match this filter":" yet"}.</div>`;
+    _logSig=""; return;
+  }
+  const t0=CONSOLE_EVENTS.length?CONSOLE_EVENTS[0].at:0;
+  const html=rows.map((e,i)=>{
+    const ms=e.elapsed_ms!=null?` <span class="ms">(${fmtMs(e.elapsed_ms)})</span>`:"";
+    const rel=e.at&&t0?`+${(e.at-t0).toFixed(2)}s`:"";
+    const icon={running:"·",ok:"✔",skipped:"⤼",error:"✖"}[e.status]||"·";
+    const dataKeys=Object.keys(e.data||{});
+    const more=verbose&&dataKeys.length
+      ? ` <span class="more" data-i="${i}">▸ ${dataKeys.length} field${dataKeys.length===1?"":"s"}</span>` : "";
+    return `<div class="ev ${esc(e.status)}"><span class="ts">${esc(fmtTime(e.at))} ${esc(rel.padStart(8))}</span>
+ ${icon} <span class="k">[${esc(e.step)}]</span> ${esc(e.status)}${ms} ${esc(e.detail||"")}${more}
+<div class="dwrap" data-w="${i}"></div></div>`;
+  }).join("");
+  // Same rule as the inspector: only touch the DOM when something changed, and restore any
+  // payloads the operator had expanded.
+  if(html===_logSig) return;
+  const expanded=new Set();
+  el.querySelectorAll(".dwrap").forEach(w=>{ if(w.innerHTML) expanded.add(w.dataset.w); });
+  el.innerHTML=html;
+  _logSig=html;
+  expanded.forEach(i=>{
+    const w=el.querySelector(`.dwrap[data-w="${i}"]`), m=el.querySelector(`.more[data-i="${i}"]`);
+    if(w && rows[+i]){ w.innerHTML=`<pre>${esc(JSON.stringify(rows[+i].data,null,2))}</pre>`;
+      if(m) m.textContent=m.textContent.replace("▸","▾"); }
+  });
+  el.querySelectorAll(".more").forEach(m=>m.onclick=()=>{
+    const i=+m.dataset.i, wrap=el.querySelector(`.dwrap[data-w="${i}"]`);
+    if(wrap.innerHTML){ wrap.innerHTML=""; m.textContent=m.textContent.replace("▾","▸"); }
+    else{ wrap.innerHTML=`<pre>${esc(JSON.stringify(rows[i].data,null,2))}</pre>`;
+      m.textContent=m.textContent.replace("▸","▾"); }
+  });
+  if($("#cAuto").checked) el.scrollTop=el.scrollHeight;
+}
+["#cFilter","#cLevel","#cVerbose"].forEach(s=>{
+  const el=$(s); el.addEventListener(el.tagName==="INPUT"&&el.type==="text"?"input":"change", paintConsole);
+});
+$("#cCopy").onclick=()=>copyText(CONSOLE_EVENTS.map(e=>
+  `${fmtTime(e.at)} [${e.step}] ${e.status}${e.elapsed_ms!=null?" ("+e.elapsed_ms+"ms)":""} ${e.detail||""}`
+).join("\n"), "CLI log copied");
+$("#cReport").onclick=openReport;
+function openTextModal(title, text){
+  $("#repTitle").textContent = title || "Details";
+  $("#repBody").textContent  = text || "";
+  $("#repMeta").textContent  = fmtNum((text||"").length) + " chars";
+  $("#reportModal").classList.add("show");
+}
+function openReport(){
+  const txt=currentJob?.report_markdown||"";
+  if(!txt){ toast("No stored report for this job","err"); return; }
+  openTextModal("Final report", txt);
+}
+$("#repCopy").onclick=()=>copyText($("#repBody").textContent,"Copied");
+$("#repClose").onclick=$("#repX").onclick=()=>$("#reportModal").classList.remove("show");
+
+(function initConsoleResize(){
+  const con=$("#console"), grip=$("#cgrip");
+  const saved=+localStorage.getItem("vista-console-h");
+  if(saved>60) con.style.height=saved+"px";
+  let dragging=false, sy=0, sh=0;
+  grip.addEventListener("mousedown", e=>{ dragging=true; sy=e.clientY; sh=con.offsetHeight;
+    document.body.style.userSelect="none"; e.preventDefault(); });
+  window.addEventListener("mousemove", e=>{
+    if(!dragging) return;
+    const h=Math.max(34, Math.min(window.innerHeight*0.7, sh-(e.clientY-sy)));
+    con.style.height=h+"px"; con.classList.toggle("collapsed", h<=36);
+  });
+  window.addEventListener("mouseup", ()=>{
+    if(!dragging) return;
+    dragging=false; document.body.style.userSelect="";
+    localStorage.setItem("vista-console-h", con.offsetHeight);
+    drawEdges();
+  });
+  $("#cToggle").onclick=()=>{
+    con.classList.toggle("collapsed");
+    $("#cToggle").textContent=con.classList.contains("collapsed")?"▴":"▾";
+    setTimeout(drawEdges,180);
+  };
+})();
+
+/* ---------------------------- dashboard ---------------------------- */
+let LAST_ANALYTICS=null;
+const DASH = {range:"24", tool:"", analyzer:"", status:"", ai:"", orb:"", q:""};
+const RANGE_LABEL = {"1":"last hour","24":"last 24 hours","168":"last 7 days","720":"last 30 days","":"all time"};
+
+$("#dRange").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  $("#dRange").querySelectorAll("button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active"); DASH.range=b.dataset.h; loadAnalytics();
+});
+[["#dTool","tool"],["#dAnalyzer","analyzer"],["#dStatus","status"],["#dAi","ai"],["#dOrb","orb"]]
+  .forEach(([sel,key])=>$(sel).onchange=e=>{ DASH[key]=e.target.value; loadAnalytics(); });
+let dashQTimer=null;
+$("#dQ").addEventListener("input", e=>{
+  clearTimeout(dashQTimer);
+  dashQTimer=setTimeout(()=>{ DASH.q=e.target.value.trim(); loadAnalytics(); }, 280);
+});
+$("#dRefresh").onclick=loadAnalytics;
+$("#dReset").onclick=()=>{
+  Object.assign(DASH,{range:"24",tool:"",analyzer:"",status:"",ai:"",orb:"",q:""});
+  $("#dRange").querySelectorAll("button").forEach(x=>x.classList.toggle("active", x.dataset.h==="24"));
+  ["#dTool","#dAnalyzer","#dStatus","#dAi","#dOrb","#dQ"].forEach(sel=>$(sel).value="");
+  loadAnalytics();
+};
+
+function bucketFor(h){ if(!h) return "day"; const n=+h; return n<=2?"minute":(n<=48?"hour":"day"); }
+
+function dashParams(){
+  const p=new URLSearchParams();
+  if(DASH.range) p.set("since_hours", DASH.range);
+  if(DASH.tool) p.set("tool", DASH.tool);
+  if(DASH.analyzer) p.set("analyzer", DASH.analyzer);
+  if(DASH.status) p.set("status", DASH.status);
+  if(DASH.ai) p.set("ai", DASH.ai);
+  if(DASH.orb) p.set("orb", DASH.orb);
+  if(DASH.q) p.set("q", DASH.q);
+  p.set("bucket", bucketFor(DASH.range));
+  return p;
+}
+
+/* The summary line always states, in words, exactly which slice is on screen — and each active
+   filter is removable from here without hunting for the control that set it. */
+function renderFilterSummary(total){
+  const chips=[];
+  const add=(key,label)=>chips.push(
+    `<span class="fchip">${esc(label)}<button data-clear="${key}" title="Remove">✕</button></span>`);
+  if(DASH.tool) add("tool","tool: "+DASH.tool);
+  if(DASH.analyzer) add("analyzer","analyzer: "+DASH.analyzer);
+  if(DASH.status) add("status","status: "+DASH.status);
+  if(DASH.ai) add("ai", DASH.ai==="on"?"AI answered":"AI fail-safe/off");
+  if(DASH.orb) add("orb", DASH.orb==="on"?"ORB appended":"no ORB");
+  if(DASH.q) add("q",`search: “${clip(DASH.q,28)}”`);
+  $("#dSummary").innerHTML =
+    `<span>Showing <b>${fmtNum(total)}</b> job${total===1?"":"s"} · <b>${esc(RANGE_LABEL[DASH.range] ?? DASH.range+"h")}</b></span>`
+    + (chips.length ? chips.join("") : `<span style="color:var(--faint)">no extra filters</span>`)
+    + (chips.length ? `<button class="btn sm ghost" id="dSumReset" style="margin-left:auto">Clear all</button>` : "");
+  $("#dSummary").querySelectorAll("[data-clear]").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.clear; DASH[k]="";
+    const map={tool:"#dTool",analyzer:"#dAnalyzer",status:"#dStatus",ai:"#dAi",orb:"#dOrb",q:"#dQ"};
+    if(map[k]) $(map[k]).value="";
+    loadAnalytics();
+  });
+  const r=$("#dSumReset"); if(r) r.onclick=()=>$("#dReset").click();
+}
+
+/* Any number on the dashboard is a question — clicking it should show the rows behind it. */
+function gotoHistory(extra){
+  $("#hQ").value        = DASH.q || "";
+  $("#hTool").value     = DASH.tool || "";
+  $("#hAnalyzer").value = DASH.analyzer || "";
+  $("#hRange").value    = DASH.range || "";
+  $("#hStatus").value   = (extra && extra.status !== undefined) ? extra.status : (DASH.status || "");
+  $("#hAi").value       = (extra && extra.ai !== undefined) ? extra.ai : (DASH.ai || "");
+  histOffset=0;
+  setView("hist");
+}
+
+async function loadAnalytics(){
+  try{
+    const d=await (await fetch(API+"analytics?"+dashParams())).json();
+    LAST_ANALYTICS=d; renderDash(d);
+    $("#dStamp").textContent="updated "+new Date().toLocaleTimeString([], {hour12:false});
+  }catch(e){
+    $("#dashBody").innerHTML=`<div class="empty"><span class="big">⚠️</span>Could not load analytics.</div>`;
+  }
+}
+function renderDash(d){
+  const body=$("#dashBody");
+  if(!d){ body.innerHTML=""; return; }
+  if(!d.available){
+    body.innerHTML=`<div class="empty"><span class="big">🗄</span>
+      <b>Job history is not connected.</b><br><br>
+      Set <code style="font-family:var(--mono)">DATABASE_URL</code> (e.g.
+      <code style="font-family:var(--mono)">postgresql+psycopg://user:pass@host:5432/usage_logs</code>)
+      and restart the server. See <code style="font-family:var(--mono)">docs/db_setup.md</code>.<br>
+      <span style="font-size:12px">${esc((STATE.db&&STATE.db.last_error)||"")}</span></div>`;
+    return;
+  }
+  const t=d.totals||{};
+  const okRate=t.total? Math.round((t.done/t.total)*100) : 0;
+  renderFilterSummary(t.total||0);
+  const kpis=`<div class="kpis">
+    ${kpi("Jobs", fmtNum(t.total), RANGE_LABEL[DASH.range] ?? (DASH.range+"h"), "accent", {})}
+    ${kpi("Succeeded", fmtNum(t.done), okRate+"% success rate", okRate>=95?"ok":(okRate>=80?"":""), {status:"done"})}
+    ${kpi("Errors", fmtNum(t.errored), t.errored?"click to inspect them":"none in this range",
+          t.errored?"err":"", {status:"error"})}
+    ${kpi("Median duration", fmtMs(t.p50_ms), `p95 ${fmtMs(t.p95_ms)} · max ${fmtMs(t.max_ms)}`,"info")}
+    ${kpi("AI Controller", t.total?Math.round((t.ai_jobs/t.total)*100)+"%":"—",
+        `${fmtNum(t.ai_jobs)} answered · ${fmtNum(t.ai_plans)} plans used as-is`,"",{ai:"on"})}
+    ${kpi("ORB appended", fmtNum(t.orb_jobs), t.total?Math.round((t.orb_jobs/t.total)*100)+"% of jobs":"","")}
+    ${kpi("Report volume", fmtNum(t.report_chars), fmtBytes(t.file_bytes)+" of logs analyzed","")}
+  </div>`;
+
+  const series=d.series||[];
+  const cards=`<div class="cards">
+    <div class="card wide">
+      <div class="card-hd">📊 Jobs over time <span class="sub">bucket: ${esc(d.bucket)}</span></div>
+      <div class="card-bd"><div id="chartHost"></div>
+        <div class="legend"><span><i style="background:var(--red)"></i>jobs</span>
+          <span><i style="background:var(--err)"></i>errors</span>
+          <span><i style="background:var(--info)"></i>avg duration</span></div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd">🧩 By tool</div>
+      <div class="card-bd">${toolTable(d.by_tool||[])}</div>
+    </div>
+    <div class="card">
+      <div class="card-hd">📊 By analyzer <span class="sub">selection · outcome · plan source</span></div>
+      <div class="card-bd">${analyzerTable(d.by_analyzer||[])}</div>
+    </div>
+    <div class="card wide">
+      <div class="card-hd">⚠️ Recent errors</div>
+      <div class="card-bd">${errorTable(d.errors||[])}</div>
+    </div>
+  </div>`;
+  body.innerHTML=kpis+cards;
+  // The chart is drawn at 1:1 against its real container width, so labels and bars keep their
+  // intended size no matter how wide the window is.
+  const host=$("#chartHost");
+  if(host) host.innerHTML=barChart(series, Math.max(320, host.clientWidth||640), d.bucket);
+  body.querySelectorAll("[data-job]").forEach(r=>r.onclick=()=>openJobFromHistory(r.dataset.job));
+  body.querySelectorAll("[data-kpi]").forEach(k=>k.onclick=()=>gotoHistory(JSON.parse(k.dataset.kpi)));
+  // drilling in from a table row narrows the dashboard itself
+  body.querySelectorAll("[data-filter-tool]").forEach(r=>r.onclick=()=>{
+    DASH.tool=r.dataset.filterTool; $("#dTool").value=DASH.tool; loadAnalytics(); });
+  body.querySelectorAll("[data-filter-analyzer]").forEach(r=>r.onclick=()=>{
+    DASH.analyzer=r.dataset.filterAnalyzer; $("#dAnalyzer").value=DASH.analyzer; loadAnalytics(); });
+}
+function kpi(l,v,s,cls,drill){
+  const click = drill ? ` data-kpi='${JSON.stringify(drill)}' role="button" tabindex="0"` : "";
+  return `<div class="kpi ${cls||""}${drill?" clickable":""}"${click}>
+    ${drill?`<span class="go">view →</span>`:""}
+    <div class="l">${esc(l)}</div><div class="v">${esc(String(v))}</div>
+    <div class="s">${esc(s||"")}</div></div>`;
+}
+/* The API only returns buckets that had jobs. A timeline with holes in it reads as "nothing
+   happened at 09:00" only if the empty bucket is actually drawn — so fill the gaps here. */
+function fillSeries(series, bucket){
+  if(series.length < 2) return series;
+  const step = {minute:60e3, hour:3600e3, day:86400e3, week:604800e3}[bucket] || 3600e3;
+  const byT = {}; series.forEach(x => byT[new Date(x.t).getTime()] = x);
+  const end = new Date(series[series.length-1].t).getTime();
+  const out = []; let t = new Date(series[0].t).getTime(), guard = 0;
+  while(t <= end && guard++ < 1500){
+    out.push(byT[t] || {t:new Date(t).toISOString(), n:0, errors:0, avg_ms:0, empty:true});
+    t += step;
+  }
+  return out.length <= 1500 ? out : series;
+}
+function barChart(series, hostW, bucket){
+  if(!series.length) return `<div class="empty">No jobs in this range.</div>`;
+  series = fillSeries(series, bucket);
+  const W=Math.max(hostW||640, series.length*30), H=200, pad={l:40,r:52,t:14,b:28};
+  const maxN=Math.max(1,...series.map(s=>s.n));
+  const maxMs=Math.max(1,...series.map(s=>s.avg_ms||0));
+  const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  const slot=iw/series.length;
+  const bw=Math.max(3, Math.min(26, slot-5));
+  let bars="", line="", ticks="", lineOpen=false;
+  series.forEach((s,i)=>{
+    const x=pad.l+slot*i+(slot-bw)/2;
+    const h=(s.n/maxN)*ih, y=pad.t+ih-h;
+    bars+=`<rect class="b${s.n?"":" zero"}" x="${x.toFixed(1)}" y="${(s.n?y:pad.t+ih-1.5).toFixed(1)}"
+      width="${bw.toFixed(1)}" height="${(s.n?Math.max(1,h):1.5).toFixed(1)}"><title>${esc(s.t)} — ${s.n} jobs, ${s.errors} errors, avg ${fmtMs(s.avg_ms)}</title></rect>`;
+    if(s.errors){
+      const eh=(s.errors/maxN)*ih;
+      bars+=`<rect class="b err" x="${x.toFixed(1)}" y="${(pad.t+ih-eh).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,eh).toFixed(1)}"></rect>`;
+    }
+    const cx=x+bw/2, cy=pad.t+ih-((s.avg_ms||0)/maxMs)*ih;
+    if(s.n){ line += (lineOpen ? " L" : "M") + cx.toFixed(1) + "," + cy.toFixed(1); lineOpen = true; }
+    else { lineOpen = false; }
+    if(series.length<=14||i%Math.ceil(series.length/12)===0){
+      const lbl=new Date(s.t).toLocaleString([], {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
+      ticks+=`<text class="axis" x="${cx}" y="${H-8}" text-anchor="middle">${esc(lbl)}</text>`;
+    }
+  });
+  // width/height as real attributes (not 100%) → the SVG renders 1:1, so 9.5px axis text stays
+  // 9.5px. The wrapper scrolls if a long range makes the chart wider than the card.
+  return `<div style="overflow-x:auto"><svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <line class="grid" x1="${pad.l}" y1="${pad.t}" x2="${W-pad.r}" y2="${pad.t}"/>
+    <line class="grid" x1="${pad.l}" y1="${pad.t+ih/2}" x2="${W-pad.r}" y2="${pad.t+ih/2}"/>
+    <line class="grid" x1="${pad.l}" y1="${pad.t+ih}" x2="${W-pad.r}" y2="${pad.t+ih}"/>
+    <text class="axis" x="6" y="${pad.t+4}">${maxN}</text><text class="axis" x="6" y="${pad.t+ih}">0</text>
+    <text class="axis" x="${W-pad.r+6}" y="${pad.t+4}">${esc(fmtMs(maxMs))}</text>
+    <text class="axis" x="${W-pad.r+6}" y="${pad.t+ih}">0s</text>
+    ${bars}<path class="ln" d="${line}"/>${ticks}</svg></div>`;
+}
+function toolTable(rows){
+  if(!rows.length) return `<div class="empty">No data.</div>`;
+  const max=Math.max(...rows.map(r=>r.n));
+  return `<table class="data"><thead><tr><th>Tool</th><th class="num">Jobs</th><th class="num">Errors</th>
+    <th class="num">Avg</th></tr></thead><tbody>${rows.map(r=>`
+    <tr class="clickable" data-filter-tool="${esc(r.name)}" title="Filter the dashboard by this tool">
+      <td><div class="bar-cell"><span class="truncate" style="max-width:150px">${esc(r.name)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${(r.n/max*100).toFixed(0)}%"></span></span></div></td>
+      <td class="num">${fmtNum(r.n)}</td>
+      <td class="num" style="${r.errors?'color:var(--err);font-weight:700':''}">${fmtNum(r.errors)}</td>
+      <td class="num">${fmtMs(r.avg_ms)}</td></tr>`).join("")}</tbody></table>`;
+}
+function analyzerTable(rows){
+  if(!rows.length) return `<div class="empty">No analyzer runs recorded yet.</div>`;
+  const max=Math.max(...rows.map(r=>r.selected||1));
+  return `<table class="data"><thead><tr><th>Analyzer</th><th class="num">Selected</th><th class="num">OK</th>
+    <th class="num">Failed</th><th class="num">Avg</th><th class="num">AI plan</th></tr></thead><tbody>${rows.map(r=>`
+    <tr class="clickable" data-filter-analyzer="${esc(r.name)}" title="Filter the dashboard by this analyzer">
+      <td><div class="bar-cell"><span class="truncate" style="max-width:120px;font-family:var(--mono)">${esc(r.name)}</span>
+      <span class="bar-track"><span class="bar-fill info" style="width:${(r.selected/max*100).toFixed(0)}%"></span></span></div></td>
+      <td class="num">${fmtNum(r.selected)}</td>
+      <td class="num" style="color:var(--ok)">${fmtNum(r.ok)}</td>
+      <td class="num" style="${r.failed?'color:var(--err);font-weight:700':''}">${fmtNum(r.failed)}</td>
+      <td class="num">${fmtMs(r.avg_ms)}</td>
+      <td class="num" title="requests planned by the AI Controller and used verbatim / after validation fixed a field">
+        ${fmtNum(r.ai_plans)}${r.corrected_plans?` <span style="color:var(--skip)">(+${r.corrected_plans})</span>`:""}</td></tr>`).join("")}
+    </tbody></table>`;
+}
+function errorTable(rows){
+  if(!rows.length) return `<div class="empty" style="padding:22px">No errors in this range. 🎉</div>`;
+  return `<table class="data"><thead><tr><th>When</th><th>Tool</th><th>Question</th><th>Error</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr class="clickable" data-job="${esc(r.job_id)}">
+      <td class="mono">${esc(fmtDateTime(r.started_at))}</td><td>${esc(r.tool_name)}</td>
+      <td class="truncate" style="max-width:260px">${esc(r.question||"—")}</td>
+      <td class="truncate" style="max-width:260px;color:var(--err)">${esc(r.error||"—")}</td></tr>`).join("")}</tbody></table>`;
+}
+
+/* ---------------------------- history ---------------------------- */
+let histOffset=0, histTotal=0;
+function histParams(){
+  const p=new URLSearchParams();
+  const q=$("#hQ").value.trim(); if(q) p.set("q", q);
+  if($("#hTool").value) p.set("tool", $("#hTool").value);
+  if($("#hStatus").value) p.set("status", $("#hStatus").value);
+  if($("#hAnalyzer").value) p.set("analyzer", $("#hAnalyzer").value);
+  if($("#hRange").value) p.set("since_hours", $("#hRange").value);
+  if($("#hAi").value) p.set("ai", $("#hAi").value);
+  p.set("limit", $("#hSize").value); p.set("offset", histOffset);
+  return p;
+}
+let histTimer=null;
+function debouncedHistory(){ clearTimeout(histTimer); histTimer=setTimeout(()=>{histOffset=0;loadHistory();},260); }
+["#hTool","#hStatus","#hAnalyzer","#hRange","#hAi","#hSize"].forEach(s=>$(s).onchange=()=>{histOffset=0;loadHistory();});
+$("#hQ").addEventListener("input", debouncedHistory);
+$("#hRefresh").onclick=loadHistory;
+$("#hPrev").onclick=()=>{ histOffset=Math.max(0,histOffset-(+$("#hSize").value)); loadHistory(); };
+$("#hNext").onclick=()=>{ if(histOffset+(+$("#hSize").value)<histTotal){ histOffset+=(+$("#hSize").value); loadHistory(); } };
+
+async function loadHistory(){
+  const body=$("#histBody");
+  try{
+    const d=await (await fetch(API+"jobs?"+histParams())).json();
+    if(!d.available){
+      body.innerHTML=`<div class="empty"><span class="big">🗄</span><b>Job history is not connected.</b><br><br>
+        Set <code style="font-family:var(--mono)">DATABASE_URL</code> and restart the server —
+        every job is then stored permanently. See <code style="font-family:var(--mono)">docs/db_setup.md</code>.</div>`;
+      $("#hTotal").textContent="0"; $("#hRangeTxt").textContent=""; return;
+    }
+    histTotal=d.total;
+    $("#hTotal").textContent=fmtNum(d.total)+" jobs";
+    const from=d.total?histOffset+1:0, to=Math.min(histOffset+d.jobs.length, d.total);
+    $("#hRangeTxt").textContent=`showing ${fmtNum(from)}–${fmtNum(to)} of ${fmtNum(d.total)}`;
+    $("#hPrev").disabled=histOffset<=0;
+    $("#hNext").disabled=to>=d.total;
+    if(!d.jobs.length){
+      body.innerHTML=`<div class="empty"><span class="big">🔍</span>No jobs match these filters.</div>`;
+      return;
+    }
+    body.innerHTML=`<table class="data"><thead><tr>
+      <th>Started</th><th>Status</th><th>Tool</th><th>Question</th><th>File</th>
+      <th>Analyzers</th><th>AI</th><th>ORB</th><th class="num">Duration</th><th class="num">Report</th><th>Job</th>
+      </tr></thead><tbody>${d.jobs.map(j=>{
+        const sc=j.status==="running"?"running":(j.status==="error"?"error":"done");
+        return `<tr class="clickable" data-job="${esc(j.job_id)}" title="Open this job's flow">
+          <td class="mono" style="white-space:nowrap">${esc(fmtDateTime(j.started_at))}<br>
+            <span style="color:var(--faint)">${esc(ago(j.started_at))}</span></td>
+          <td><span class="chip ${sc}">${esc(j.status)}</span></td>
+          <td class="truncate" style="max-width:150px">${esc(j.tool_name)}</td>
+          <td class="truncate" style="max-width:280px">${esc(j.question||"—")}</td>
+          <td class="truncate mono" style="max-width:150px">${esc(j.filename||"—")}<br>
+            <span style="color:var(--faint)">${esc(fmtBytes(j.file_bytes))}</span></td>
+          <td class="mono" style="font-size:10.5px">${esc((j.selected_analyzers||[]).join(", ")||"—")}</td>
+          <td>${j.used_ai?`<span class="chip info" title="${esc(j.ai_reason||"")}">${esc(j.ai_plan_source||"ai")}</span>`
+              :`<span class="chip neutral" title="${esc(j.ai_reason||"")}">fail-safe</span>`}</td>
+          <td>${j.orb_status==="ok"?'<span class="chip done">ok</span>':
+              `<span class="chip neutral">${esc(j.orb_status||"off")}</span>`}</td>
+          <td class="num">${j.duration_s!=null?j.duration_s+"s":"—"}</td>
+          <td class="num">${fmtNum(j.report_chars)}</td>
+          <td class="mono">${esc(j.job_id.slice(0,8))}</td></tr>`;
+      }).join("")}</tbody></table>`;
+    body.querySelectorAll("[data-job]").forEach(r=>r.onclick=()=>openJobFromHistory(r.dataset.job));
+  }catch(e){
+    body.innerHTML=`<div class="empty"><span class="big">⚠️</span>Could not load history.</div>`;
+  }
+}
+async function openJobFromHistory(id){
+  selectedJob=id; selectedTool=null; selectedNodeKey=null;
+  setView("flow");
+  await loadJob(id);
+  renderTabs(); renderJobList();
+}
+
+function fillToolSelects(){
+  const names=Object.keys(STATE.tools||{});
+  [["#dTool",DASH.tool],["#hTool",null]].forEach(([sel,cur])=>{
+    const el=$(sel); const keep=el.value;
+    const opts=`<option value="">all tools</option>`+names.map(n=>`<option>${esc(n)}</option>`).join("");
+    if(el.dataset.filled!==names.join("|")){ el.innerHTML=opts; el.dataset.filled=names.join("|"); el.value=keep||cur||""; }
+  });
+}
+(async function fillFacets(){
+  try{
+    const f=await (await fetch(API+"facets")).json();
+    if(!f.available) return;
+    const opts=`<option value="">any analyzer</option>`+(f.analyzers||[]).map(a=>`<option>${esc(a)}</option>`).join("");
+    $("#hAnalyzer").innerHTML=opts;
+    $("#dAnalyzer").innerHTML=`<option value="">any</option>`+(f.analyzers||[]).map(a=>`<option>${esc(a)}</option>`).join("");
+  }catch(e){}
+})();
+
+/* ---------------------------- integrations ---------------------------- */
 $("#intgBtn").onclick=()=>{ renderIntegrations(); $("#intgModal").classList.add("show"); };
-$("#intgClose").onclick=()=>$("#intgModal").classList.remove("show");
-$("#intgEdit").onclick=()=>{ $("#intgModal").classList.remove("show"); openConfig(false); };
+$("#intgClose").onclick=$("#intgX").onclick=()=>$("#intgModal").classList.remove("show");
+$("#intgEdit").onclick=()=>{ $("#intgModal").classList.remove("show"); openConfig(); };
 function renderIntegrations(){
   const tools=STATE.tools||{}; const names=Object.keys(tools);
-  let analyzers=0, orbOn=0;
-  names.forEach(n=>{ analyzers+=(tools[n].analyzers||[]).length; if(tools[n].orb_enabled) orbOn++; });
-  let html=`<div class="stat-row">
-    <div class="stat"><div class="v">${names.length}</div><div class="l">MCP tools</div></div>
-    <div class="stat"><div class="v">${analyzers}</div><div class="l">VISTA analyzers</div></div>
-    <div class="stat"><div class="v">${orbOn}</div><div class="l">with ORB</div></div>
+  let analyzers=0, mand=0, orbOn=0;
+  names.forEach(n=>{ const a=tools[n].analyzers||[]; analyzers+=a.length;
+    mand+=a.filter(x=>x.mandatory).length; if(tools[n].orb_enabled) orbOn++; });
+  const ai=(STATE.server&&STATE.server.ai_controller)||{};
+  let html=`<div class="kpis" style="margin-bottom:14px">
+    ${kpi("MCP tools", names.length,"exposed in list_tools","accent")}
+    ${kpi("VISTA analyzers", analyzers, `${mand} mandatory · ${analyzers-mand} optional`,"")}
+    ${kpi("Tools with ORB", orbOn, "troubleshooting appended","")}
+    ${kpi("AI Controller", ai.enabled?"on":"off", ai.enabled?"routes + plans every call":"deterministic fallback", ai.enabled?"ok":"")}
   </div>`;
   html+=names.map(n=>{
     const t=tools[n]; const ans=(t.analyzers||[]);
     const rows=ans.map(a=>{
       const role=!a.enabled?["dis","disabled"]:(a.mandatory?["mand","mandatory"]:["opt","optional"]);
-      return `<tr><td><span class="aid">${esc(a.id)}</span></td>
+      return `<tr><td class="mono" style="font-weight:700">${esc(a.id)}</td>
         <td>${esc(a.title||"")}</td>
         <td><span class="arole ${role[0]}">${role[1]}</span></td>
-        <td class="aurl">${esc(a.api_url||"")}</td></tr>`;
-    }).join("") || `<tr><td colspan="4" style="color:var(--muted)">no analyzers yet</td></tr>`;
+        <td class="mono" style="color:var(--muted);font-size:11px">${esc(a.api_url||"")}</td>
+        <td class="num mono" style="color:var(--muted)">${esc(String(a.timeout??""))}s</td></tr>`;
+    }).join("") || `<tr><td colspan="5" style="color:var(--muted)">no analyzers yet</td></tr>`;
     return `<div class="intg">
       <div class="ih"><span>🧩</span><span class="name">${esc(n)}</span>
         <span class="badges">
           <span class="badge ${t.orb_enabled?'on':'off'}">ORB ${t.orb_enabled?'on':'off'}</span>
-          <span class="badge ${t.routing_system_prompt?'cust':'off'}">${t.routing_system_prompt?'custom prompt':'default prompt'}</span>
-          <span class="badge on">${ans.length} analyzer${ans.length===1?'':'s'}</span>
+          <span class="badge ${t.routing_system_prompt?'cust':'off'}">${t.routing_system_prompt?'custom routing prompt':'default routing prompt'}</span>
+          <span class="badge info">${ans.length} analyzer${ans.length===1?'':'s'}</span>
         </span></div>
-      ${t.description?`<div class="idesc">${esc(clip(t.description,220))}</div>`:""}
-      <table><thead><tr><th></th></tr></thead><tbody>${rows}</tbody></table>
+      ${t.description?`<div class="idesc">${esc(clip(t.description,260))}</div>`:""}
+      <table class="data" style="margin-top:6px">
+        <thead><tr><th>id</th><th>title</th><th>role</th><th>api_url</th><th class="num">timeout</th></tr></thead>
+        <tbody>${rows}</tbody></table>
     </div>`;
-  }).join("") || `<div class="empty" style="position:static">No tools integrated yet. Use “Add / Edit Tools”.</div>`;
+  }).join("") || `<div class="empty">No tools integrated yet. Use “Add / Edit Tools”.</div>`;
   $("#intgBody").innerHTML=html;
 }
 
-// ---- config editor ----
+/* ---------------------------- config editor ---------------------------- */
 let RAW=null, rawMode=false;
-function openConfig(focusAdd){
+function openConfig(){
   fetch(API+"config").then(r=>r.json()).then(cfg=>{
-    RAW=cfg; rawMode=false; $("#rawView").style.display="none"; $("#formView").style.display="block";
+    RAW=cfg; rawMode=false;
+    $("#rawView").style.display="none"; $("#formView").style.display="block";
     buildForm(); $("#saveMsg").textContent=""; $("#modal").classList.add("show");
-    if(focusAdd) setTimeout(()=>{const b=$("#addTool"); if(b) b.scrollIntoView({behavior:"smooth"});},50);
   });
 }
-$("#cfgBtn").onclick=()=>openConfig(false);
-$("#cancelBtn").onclick=()=>$("#modal").classList.remove("show");
+$("#cfgBtn").onclick=openConfig;
+$("#cancelBtn").onclick=$("#cfgClose").onclick=()=>$("#modal").classList.remove("show");
 $("#rawToggle").onclick=()=>{
-  if(!rawMode){ RAW=collectForm()||RAW; $("#rawEditor").value=JSON.stringify(RAW,null,2);
-    $("#rawView").style.display="block"; $("#formView").style.display="none"; rawMode=true; }
-  else{ try{RAW=JSON.parse($("#rawEditor").value);}catch(e){alert("Raw JSON invalid: "+e.message);return;}
-    buildForm(); $("#rawView").style.display="none"; $("#formView").style.display="block"; rawMode=false; }
+  if(!rawMode){
+    RAW=collectForm()||RAW;
+    $("#rawEditor").value=JSON.stringify(RAW,null,2);
+    $("#rawView").style.display="block"; $("#formView").style.display="none"; rawMode=true;
+    $("#rawToggle").textContent="⟷ Form view";
+  }else{
+    try{ RAW=JSON.parse($("#rawEditor").value); }
+    catch(e){ toast("Raw JSON invalid: "+e.message,"err"); return; }
+    buildForm(); $("#rawView").style.display="none"; $("#formView").style.display="block"; rawMode=false;
+    $("#rawToggle").textContent="⟷ Raw JSON";
+  }
 };
+
 function buildForm(){
   const tools=RAW.tools||{};
-  $("#formView").innerHTML=Object.entries(tools).map(([name,t])=>toolBlock(name,t)).join("")+`<button class="mini" id="addTool">＋ add tool</button>`;
+  const names=Object.keys(tools);
+  $("#formView").innerHTML = (names.length
+      ? names.map(n=>toolBlock(n,tools[n])).join("")
+      : `<div class="empty"><span class="big">🧩</span>No tools configured yet.</div>`)
+    + `<div class="row-flex" style="margin-top:6px">
+         <button class="btn" id="addToolBtn">＋ New tool (guided)</button>
+         <button class="btn ghost" id="addToolQuick">＋ Blank tool</button>
+       </div>`;
+  wireForm();
+}
+function wireForm(){
   $("#formView").querySelectorAll("[data-add-an]").forEach(b=>b.onclick=()=>{
-    RAW=collectForm()||RAW; const tn=b.dataset.addAn; RAW.tools[tn].analyzers=RAW.tools[tn].analyzers||[];
-    RAW.tools[tn].analyzers.push({id:"new_analyzer",title:"",api_url:"http://127.0.0.1:PORT/base",discover_url:"",mandatory:false,enabled:true,timeout:120});
+    RAW=collectForm()||RAW; const tn=b.dataset.addAn;
+    RAW.tools[tn].analyzers=RAW.tools[tn].analyzers||[];
+    RAW.tools[tn].analyzers.push({id:"",title:"",api_url:"",discover_url:"",
+      mandatory:false,enabled:true,timeout:120});
     buildForm();
+    const cards=document.querySelectorAll(`[data-tool-card="${CSS.escape(tn)}"] .an-card`);
+    if(cards.length) cards[cards.length-1].scrollIntoView({behavior:"smooth",block:"center"});
   });
   $("#formView").querySelectorAll("[data-del-an]").forEach(b=>b.onclick=()=>{
-    RAW=collectForm()||RAW; const [tn,idx]=b.dataset.delAn.split("|"); RAW.tools[tn].analyzers.splice(+idx,1); buildForm();
+    RAW=collectForm()||RAW; const [tn,idx]=b.dataset.delAn.split("|");
+    RAW.tools[tn].analyzers.splice(+idx,1); buildForm();
   });
   $("#formView").querySelectorAll("[data-del-tool]").forEach(b=>b.onclick=()=>{
-    if(!confirm("Remove tool '"+b.dataset.delTool+"'?"))return;
-    RAW=collectForm()||RAW; delete RAW.tools[b.dataset.delTool]; buildForm();
+    const tn=b.dataset.delTool;
+    if(!confirm(`Remove the MCP tool "${tn}"?\n\nIt disappears from list_tools as soon as you save.`)) return;
+    RAW=collectForm()||RAW; delete RAW.tools[tn]; buildForm();
   });
-  const at=$("#addTool"); if(at) at.onclick=()=>{
-    const nm=prompt("New MCP tool name (e.g. Config_Generator):"); if(!nm)return;
-    RAW=collectForm()||RAW; if(!RAW.tools)RAW.tools={};
+  $("#formView").querySelectorAll("[data-probe]").forEach(b=>b.onclick=()=>probeInto(b));
+  $("#formView").querySelectorAll("[data-role]").forEach(b=>b.onclick=()=>{
+    const [tn,idx,val]=b.dataset.role.split("|");
+    RAW=collectForm()||RAW;
+    RAW.tools[tn].analyzers[+idx].mandatory = (val==="mand");
+    buildForm();
+  });
+  const at=$("#addToolBtn"); if(at) at.onclick=()=>{ RAW=collectForm()||RAW; openWizard(); };
+  const aq=$("#addToolQuick"); if(aq) aq.onclick=()=>{
+    const nm=(prompt("New MCP tool name (letters, digits, _ and - only):")||"").trim();
+    if(!nm) return;
+    if(!/^[A-Za-z0-9_-]{1,64}$/.test(nm)){ toast("Invalid tool name","err"); return; }
+    RAW=collectForm()||RAW; RAW.tools=RAW.tools||{};
+    if(RAW.tools[nm]){ toast("That tool already exists","err"); return; }
     RAW.tools[nm]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
-    buildForm(); setTimeout(()=>{const el=[...document.querySelectorAll(".tool-block")].pop(); el&&el.scrollIntoView({behavior:"smooth"});},40);
+    buildForm();
+    const blocks=[...document.querySelectorAll(".tool-block")]; blocks.pop()?.scrollIntoView({behavior:"smooth"});
   };
 }
 function toolBlock(name,t){
-  const ans=(t.analyzers||[]).map((a,i)=>`<tr>
-    <td><input type="text" data-an="${name}|${i}|id" value="${esc(a.id||"")}"></td>
-    <td><input type="text" data-an="${name}|${i}|title" value="${esc(a.title||"")}"></td>
-    <td><input type="text" data-an="${name}|${i}|api_url" value="${esc(a.api_url||"")}"></td>
-    <td class="ctr"><input type="checkbox" data-an="${name}|${i}|mandatory" ${a.mandatory?"checked":""}></td>
-    <td class="ctr"><input type="checkbox" data-an="${name}|${i}|enabled" ${a.enabled!==false?"checked":""}></td>
-    <td><input type="number" data-an="${name}|${i}|timeout" value="${a.timeout??120}" style="width:66px"></td>
-    <td class="ctr"><button class="mini danger" data-del-an="${name}|${i}">✕</button></td></tr>`).join("");
-  return `<div class="tool-block">
-    <h3>🧩 ${esc(name)}
-      <label class="switch" style="margin-left:auto"><input type="checkbox" data-tool="${name}|orb_enabled" ${t.orb_enabled?"checked":""}> ORB enabled</label>
-      <button class="mini danger del" data-del-tool="${name}">remove tool</button></h3>
-    <label class="f">Client-facing description (shown in list_tools)</label>
-    <textarea data-tool="${name}|description" rows="2">${esc(t.description||"")}</textarea>
-    <label class="f">Routing system prompt — this tool's custom DeepSeek analyzer-selection prompt</label>
-    <textarea data-tool="${name}|routing_system_prompt" rows="4" class="mono">${esc(t.routing_system_prompt||"")}</textarea>
-    <label class="f">Analyzers &nbsp;<span style="text-transform:none;letter-spacing:0;color:var(--muted)">(mandatory = always run · optional = DeepSeek decides)</span></label>
-    <table class="an"><thead><tr><th>id</th><th>title</th><th>api_url</th><th>mand.</th><th>enab.</th><th>timeout</th><th></th></tr></thead>
-      <tbody>${ans}</tbody></table>
-    <div style="margin-top:8px"><button class="mini" data-add-an="${name}">＋ add analyzer</button></div></div>`;
+  const ans=(t.analyzers||[]).map((a,i)=>analyzerCard(name,a,i)).join("")
+    || `<div class="empty" style="padding:18px">No analyzers yet — a tool needs at least one.</div>`;
+  return `<div class="tool-block" data-tool-card="${esc(name)}">
+    <div class="th">
+      <span>🧩</span><span class="nm">${esc(name)}</span>
+      <span class="badge ${(t.analyzers||[]).length?'info':'off'}">${(t.analyzers||[]).length} analyzer${(t.analyzers||[]).length===1?'':'s'}</span>
+      <div class="spacer" style="flex:1"></div>
+      <label class="switch"><input type="checkbox" data-tool="${esc(name)}|orb_enabled" ${t.orb_enabled?"checked":""}> ORB</label>
+      <button class="btn sm ghost" data-del-tool="${esc(name)}" title="Remove this MCP tool">remove</button>
+    </div>
+    <div class="tb">
+      <div class="field">
+        <label class="f">Client-facing description<span class="tip">what the agent reads in list_tools — say what it does and that the platform injects the file</span></label>
+        <textarea data-tool="${esc(name)}|description" rows="2" placeholder="Analyze and visualize a FortiOS/FortiGate log file…">${esc(t.description||"")}</textarea>
+      </div>
+      <div class="field">
+        <label class="f">AI Controller routing prompt<span class="tip">this tool's own guidance for choosing optional analyzers — the JSON output contract is appended automatically</span></label>
+        <textarea data-tool="${esc(name)}|routing_system_prompt" rows="3" class="mono" placeholder="You are the analyzer router for …">${esc(t.routing_system_prompt||"")}</textarea>
+      </div>
+      <label class="f" style="margin-bottom:8px">Analyzers
+        <span class="tip">mandatory = always called · optional = the AI Controller decides per question</span></label>
+      ${ans}
+      <button class="btn sm" data-add-an="${esc(name)}">＋ add analyzer</button>
+    </div></div>`;
+}
+function analyzerCard(tool,a,i){
+  const k=`${tool}|${i}`;
+  return `<div class="an-card">
+    <div class="ah">
+      <span class="idf">${esc(a.id||"(new analyzer)")}</span>
+      <div class="seg-toggle" role="group" aria-label="Analyzer role">
+        <button type="button" class="${a.mandatory?"on":""}" data-role="${esc(tool)}|${i}|mand">mandatory</button>
+        <button type="button" class="${!a.mandatory?"on grey":""}" data-role="${esc(tool)}|${i}|opt">optional</button>
+      </div>
+      <label class="switch"><input type="checkbox" data-an="${esc(k)}|enabled" ${a.enabled!==false?"checked":""}> enabled</label>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm ghost" data-del-an="${esc(k)}" title="Remove analyzer">✕</button>
+    </div>
+    <div class="an-grid">
+      <div><label class="f">id<span class="tip">short, stable</span></label>
+        <input type="text" data-an="${esc(k)}|id" value="${esc(a.id||"")}" placeholder="perf"></div>
+      <div><label class="f">title</label>
+        <input type="text" data-an="${esc(k)}|title" value="${esc(a.title||"")}" placeholder="Performance Analyzer"></div>
+      <div class="full"><label class="f">api_url<span class="tip">the analyzer's base URL — /discover is derived from it</span></label>
+        <div class="row-flex">
+          <input type="text" data-an="${esc(k)}|api_url" value="${esc(a.api_url||"")}"
+            placeholder="http://127.0.0.1:8811/perf" style="flex:1;min-width:220px">
+          <button class="btn sm" data-probe="${esc(k)}">🔌 Test &amp; autofill</button>
+        </div>
+        <div class="probe-result" data-probe-out="${esc(k)}" style="display:none"></div></div>
+      <div><label class="f">discover_url<span class="tip">optional override</span></label>
+        <input type="text" data-an="${esc(k)}|discover_url" value="${esc(a.discover_url||"")}" placeholder="(derived)"></div>
+      <div><label class="f">timeout (s)</label>
+        <input type="number" data-an="${esc(k)}|timeout" value="${a.timeout??120}" min="1" max="3600"></div>
+    </div></div>`;
+}
+async function probeInto(btn){
+  const k=btn.dataset.probe;
+  const input=document.querySelector(`[data-an="${CSS.escape(k)}|api_url"]`);
+  const out=document.querySelector(`[data-probe-out="${CSS.escape(k)}"]`);
+  const url=(input.value||"").trim();
+  if(!url){ input.classList.add("err"); toast("Enter the analyzer's base URL first","err"); return; }
+  input.classList.remove("err");
+  out.style.display="block"; out.className="probe-result"; out.textContent="probing /discover …";
+  btn.disabled=true;
+  try{
+    const r=await fetch(API+"probe",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({url})});
+    const d=await r.json();
+    if(!d.ok){
+      out.className="probe-result bad";
+      out.innerHTML=`✖ ${esc(d.error||"no answer")}<span class="wu">The analyzer must expose
+        <code style="font-family:var(--mono)">GET &lt;base&gt;/discover</code> per the standard contract.</span>`;
+      return;
+    }
+    const idEl=document.querySelector(`[data-an="${CSS.escape(k)}|id"]`);
+    const tEl=document.querySelector(`[data-an="${CSS.escape(k)}|title"]`);
+    if(!idEl.value.trim()) idEl.value=d.analyzer.id||"";
+    if(!tEl.value.trim())  tEl.value=d.analyzer.title||"";
+    out.className="probe-result ok";
+    out.innerHTML=`✔ <b>${esc(d.analyzer.title||d.analyzer.id)}</b> answered ·
+      <code style="font-family:var(--mono)">${esc(d.query.method)} ${esc(d.query.path)}</code>
+      <span class="wu"><b>when_to_use:</b> ${esc(clip(d.analyzer.when_to_use||"(not stated — the AI Controller needs this to route well)",300))}</span>`;
+    RAW=collectForm()||RAW;
+  }catch(e){
+    out.className="probe-result bad"; out.textContent="✖ "+e.message;
+  }finally{ btn.disabled=false; }
 }
 function collectForm(){
-  if(rawMode){ try{return JSON.parse($("#rawEditor").value);}catch(e){return null;} }
+  if(rawMode){ try{ return JSON.parse($("#rawEditor").value); }catch(e){ return null; } }
   const out={tools:{}};
+  const known=Object.keys(RAW?.tools||{});
+  known.forEach(n=>out.tools[n]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]});
   document.querySelectorAll("[data-tool]").forEach(inp=>{
     const [tn,field]=inp.dataset.tool.split("|");
     if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
@@ -540,33 +1987,233 @@ function collectForm(){
   });
   const byTool={};
   document.querySelectorAll("[data-an]").forEach(inp=>{
-    const [tn,idx,field]=inp.dataset.an.split("|"); byTool[tn]=byTool[tn]||{}; byTool[tn][idx]=byTool[tn][idx]||{};
+    const [tn,idx,field]=inp.dataset.an.split("|");
+    byTool[tn]=byTool[tn]||{}; byTool[tn][idx]=byTool[tn][idx]||{};
     byTool[tn][idx][field]=inp.type==="checkbox"?inp.checked:(inp.type==="number"?(+inp.value||0):inp.value);
   });
   Object.entries(byTool).forEach(([tn,rows])=>{
     if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
-    out.tools[tn].analyzers=Object.keys(rows).sort((a,b)=>a-b).map(k=>{const a=rows[k];a.discover_url=a.discover_url||"";return a;});
+    out.tools[tn].analyzers=Object.keys(rows).sort((a,b)=>a-b).map(k=>{
+      const src=(RAW.tools?.[tn]?.analyzers||[])[+k]||{};
+      const a=rows[k];
+      return {id:a.id??src.id??"", title:a.title??src.title??"", api_url:a.api_url??src.api_url??"",
+        discover_url:a.discover_url??src.discover_url??"", mandatory:src.mandatory===true,
+        enabled:a.enabled!==false, timeout:a.timeout||src.timeout||120};
+    });
   });
   return out;
 }
+function validateConfig(cfg){
+  const errs=[];
+  const tools=cfg.tools||{};
+  if(!Object.keys(tools).length) errs.push("at least one tool is required");
+  Object.entries(tools).forEach(([n,t])=>{
+    if(!/^[A-Za-z0-9_-]{1,64}$/.test(n)) errs.push(`tool name "${n}" — use letters, digits, _ or - only`);
+    const ans=t.analyzers||[];
+    if(!ans.length) errs.push(`"${n}" has no analyzers`);
+    const ids=new Set();
+    ans.forEach((a,i)=>{
+      if(!a.id) errs.push(`"${n}" analyzer #${i+1} needs an id`);
+      else if(ids.has(a.id)) errs.push(`"${n}" has two analyzers with id "${a.id}"`);
+      else ids.add(a.id);
+      if(!/^https?:\/\/.+/.test(a.api_url||"")) errs.push(`"${n}" analyzer "${a.id||i+1}" needs an http(s) api_url`);
+    });
+    if(ans.length && !ans.some(a=>a.mandatory && a.enabled!==false))
+      errs.push(`"${n}" has no enabled mandatory analyzer — nothing would run by default`);
+  });
+  return errs;
+}
 $("#saveBtn").onclick=async()=>{
-  const body=collectForm(); if(!body){ setSave("raw JSON is invalid","err"); return; }
+  const body=collectForm();
+  if(!body){ setSave("raw JSON is invalid","err"); return; }
+  const errs=validateConfig(body);
+  if(errs.length){ setSave(errs[0],"err"); toast(errs[0],"err"); return; }
   setSave("saving…","");
   try{
-    const r=await fetch(API+"config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const r=await fetch(API+"config",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)});
     const d=await r.json();
-    if(d.ok){ setSave("saved ✓ tools: "+d.tools.join(", "),"ok"); await poll(); setTimeout(()=>$("#modal").classList.remove("show"),800); }
-    else setSave("error: "+d.error,"err");
+    if(d.ok){
+      setSave("saved ✓ live tools: "+d.tools.join(", "),"ok");
+      toast("Config saved — MCP tools re-synced","ok");
+      RAW=body; await poll();
+      setTimeout(()=>$("#modal").classList.remove("show"),700);
+    } else { setSave("error: "+d.error,"err"); toast("Save rejected: "+d.error,"err"); }
   }catch(e){ setSave("network error: "+e.message,"err"); }
 };
-function setSave(m,c){const el=$("#saveMsg");el.textContent=m;el.className="savemsg "+(c||"");}
+function setSave(m,c){ const el=$("#saveMsg"); el.textContent=m; el.className="savemsg "+(c||""); }
 
-$("#pauseBtn").onclick=()=>{ paused=!paused; $("#pauseBtn").textContent=paused?"▶ Resume":"⏸ Pause";
-  $("#liveTxt").textContent=paused?"paused":"live"; if(!paused) poll(); };
+/* ---------------------------- new-tool wizard ---------------------------- */
+let wiz={step:0, name:"", description:"", prompt:"", orb:false, analyzers:[]};
+const DEFAULT_PROMPT = "You are the analyzer router for this tool. Its mandatory analyzer always "
+ + "runs, so decide only which OPTIONAL companion analyzers add value for THIS user question, "
+ + "using each analyzer's stated purpose. Add one only when the question clearly calls for its "
+ + "specialty; prefer precision over breadth.";
+function openWizard(){
+  wiz={step:0,name:"",description:"",prompt:DEFAULT_PROMPT,orb:false,
+       analyzers:[{api_url:"",id:"",title:"",mandatory:true,enabled:true,timeout:300,probe:null}]};
+  $("#wizMsg").textContent="";
+  $("#wizModal").classList.add("show");
+  paintWizard();
+}
+$("#wizClose").onclick=()=>$("#wizModal").classList.remove("show");
+$("#wizBack").onclick=()=>{ if(wiz.step>0){ readWizard(); wiz.step--; paintWizard(); } };
+$("#wizNext").onclick=async()=>{
+  readWizard();
+  if(wiz.step===0){
+    if(!/^[A-Za-z0-9_-]{1,64}$/.test(wiz.name)){ wizMsg("Tool name: letters, digits, _ or - only","err"); return; }
+    if(RAW && RAW.tools && RAW.tools[wiz.name]){ wizMsg("A tool with that name already exists","err"); return; }
+    if(!wiz.description.trim()){ wizMsg("Add a description — the agent reads it to pick the tool","err"); return; }
+  }
+  if(wiz.step===2){ return commitWizard(); }
+  wiz.step++; paintWizard();
+};
+function wizMsg(m,c){ const el=$("#wizMsg"); el.textContent=m; el.className="savemsg "+(c||""); }
+function readWizard(){
+  if(wiz.step===0){
+    wiz.name=($("#wzName")?.value||"").trim();
+    wiz.description=($("#wzDesc")?.value||"");
+  } else if(wiz.step===1){
+    wiz.prompt=($("#wzPrompt")?.value||"");
+    wiz.orb=!!$("#wzOrb")?.checked;
+  } else if(wiz.step===2){
+    wiz.analyzers.forEach((a,i)=>{
+      a.api_url=($(`#wzUrl${i}`)?.value||"").trim();
+      a.id=($(`#wzId${i}`)?.value||"").trim();
+      a.title=($(`#wzTitle${i}`)?.value||"").trim();
+      a.timeout=+($(`#wzTo${i}`)?.value||300);
+      const m=document.querySelector(`[data-wzrole="${i}"] .on`);
+      if(m) a.mandatory = m.dataset.v==="mand";
+    });
+  }
+}
+function paintWizard(){
+  $("#wizStepLbl").textContent=`Step ${wiz.step+1} of 3`;
+  $("#wizBack").style.visibility = wiz.step? "visible":"hidden";
+  $("#wizNext").textContent = wiz.step===2 ? "✓ Create tool" : "Next →";
+  const b=$("#wizBody");
+  if(wiz.step===0){
+    b.innerHTML=`<div class="guide"><div class="note">A “tool” is what the MCP client sees in
+      <code>list_tools</code>. It gets its own flow, its own analyzers and its own routing prompt —
+      and it becomes callable the moment you save. No code, no restart.</div></div>
+      <div class="field"><label class="f">Tool name <span class="tip">the exact name agents call — no spaces</span></label>
+        <input type="text" id="wzName" value="${esc(wiz.name)}" placeholder="Config_Generator" autofocus></div>
+      <div class="field"><label class="f">Client-facing description <span class="tip">what the agent reads to decide whether to call it</span></label>
+        <textarea id="wzDesc" rows="4" placeholder="Generate a FortiGate configuration snippet from a running-config export. The platform supplies the file via the injected source_url field — do NOT fill it. Pass the user's ask in question.">${esc(wiz.description)}</textarea></div>`;
+  } else if(wiz.step===1){
+    b.innerHTML=`<div class="guide"><div class="note">The <b>AI Controller</b> runs on every call to this
+      tool. It reads each analyzer's live <code>/discover</code> contract, decides which optional
+      analyzers to add, and plans exactly how to call each one. This prompt is your guidance for the
+      first half of that job — the JSON output contract is appended automatically, so you can write
+      freely here.</div></div>
+      <div class="field"><label class="f">Routing system prompt</label>
+        <textarea id="wzPrompt" rows="7" class="mono">${esc(wiz.prompt)}</textarea></div>
+      <label class="switch"><input type="checkbox" id="wzOrb" ${wiz.orb?"checked":""}>
+        Append ORB troubleshooting to this tool's report</label>`;
+  } else {
+    b.innerHTML=`<div class="guide"><div class="note">Add the analyzers this tool may use. Paste a base
+      URL and hit <b>Test &amp; autofill</b> — the console fetches <code>/discover</code>, confirms the
+      analyzer speaks the standard contract, and fills in its id and title.</div></div>
+      <div id="wzAns">${wiz.analyzers.map((a,i)=>wizAnalyzer(a,i)).join("")}</div>
+      <button class="btn sm" id="wzAdd">＋ add another analyzer</button>`;
+    $("#wzAdd").onclick=()=>{ readWizard();
+      wiz.analyzers.push({api_url:"",id:"",title:"",mandatory:false,enabled:true,timeout:120,probe:null});
+      paintWizard(); };
+    wiz.analyzers.forEach((a,i)=>{
+      const pb=$(`#wzProbe${i}`); if(pb) pb.onclick=()=>wizProbe(i);
+      const del=$(`#wzDel${i}`); if(del) del.onclick=()=>{ readWizard(); wiz.analyzers.splice(i,1);
+        if(!wiz.analyzers.length) wiz.analyzers.push({api_url:"",id:"",title:"",mandatory:true,enabled:true,timeout:300,probe:null});
+        paintWizard(); };
+      document.querySelectorAll(`[data-wzrole="${i}"] button`).forEach(btn=>btn.onclick=()=>{
+        document.querySelectorAll(`[data-wzrole="${i}"] button`).forEach(x=>x.classList.remove("on","grey"));
+        btn.classList.add("on"); if(btn.dataset.v==="opt") btn.classList.add("grey");
+      });
+    });
+  }
+}
+function wizAnalyzer(a,i){
+  return `<div class="an-card">
+    <div class="ah"><span class="idf">Analyzer ${i+1}</span>
+      <div class="seg-toggle" data-wzrole="${i}">
+        <button type="button" data-v="mand" class="${a.mandatory?"on":""}">mandatory</button>
+        <button type="button" data-v="opt" class="${!a.mandatory?"on grey":""}">optional</button>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm ghost" id="wzDel${i}">✕</button></div>
+    <div class="an-grid">
+      <div class="full"><label class="f">Analyzer base URL</label>
+        <div class="row-flex">
+          <input type="text" id="wzUrl${i}" value="${esc(a.api_url)}" placeholder="http://127.0.0.1:8811/perf" style="flex:1;min-width:220px">
+          <button class="btn sm" id="wzProbe${i}">🔌 Test &amp; autofill</button>
+        </div>
+        <div class="probe-result" id="wzOut${i}" style="${a.probe?"":"display:none"}">${a.probe||""}</div></div>
+      <div><label class="f">id</label><input type="text" id="wzId${i}" value="${esc(a.id)}" placeholder="perf"></div>
+      <div><label class="f">title</label><input type="text" id="wzTitle${i}" value="${esc(a.title)}" placeholder="Performance Analyzer"></div>
+      <div><label class="f">timeout (s)</label><input type="number" id="wzTo${i}" value="${a.timeout}" min="1" max="3600"></div>
+    </div></div>`;
+}
+async function wizProbe(i){
+  readWizard();
+  const url=wiz.analyzers[i].api_url;
+  const out=$(`#wzOut${i}`);
+  if(!url){ toast("Enter the base URL first","err"); return; }
+  out.style.display="block"; out.className="probe-result"; out.textContent="probing /discover …";
+  try{
+    const d=await (await fetch(API+"probe",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({url})})).json();
+    if(!d.ok){
+      out.className="probe-result bad"; out.textContent="✖ "+(d.error||"no answer");
+      wiz.analyzers[i].probe=out.innerHTML; return;
+    }
+    wiz.analyzers[i].id=wiz.analyzers[i].id||d.analyzer.id||"";
+    wiz.analyzers[i].title=wiz.analyzers[i].title||d.analyzer.title||"";
+    out.className="probe-result ok";
+    out.innerHTML=`✔ <b>${esc(d.analyzer.title||d.analyzer.id)}</b> ·
+      <code style="font-family:var(--mono)">${esc(d.query.method)} ${esc(d.query.path)}</code>
+      <span class="wu"><b>when_to_use:</b> ${esc(clip(d.analyzer.when_to_use||"(not stated)",280))}</span>`;
+    wiz.analyzers[i].probe=out.innerHTML;
+    paintWizard();
+  }catch(e){ out.className="probe-result bad"; out.textContent="✖ "+e.message; }
+}
+async function commitWizard(){
+  const bad=wiz.analyzers.find(a=>!/^https?:\/\/.+/.test(a.api_url||"")||!a.id);
+  if(bad){ wizMsg("Every analyzer needs an id and an http(s) base URL","err"); return; }
+  if(!wiz.analyzers.some(a=>a.mandatory)){ wizMsg("Mark at least one analyzer mandatory","err"); return; }
+  const cfg = (rawMode ? (()=>{try{return JSON.parse($("#rawEditor").value);}catch(e){return RAW;}})() : collectForm()) || RAW || {tools:{}};
+  cfg.tools=cfg.tools||{};
+  cfg.tools[wiz.name]={
+    description:wiz.description, routing_system_prompt:wiz.prompt, orb_enabled:!!wiz.orb,
+    analyzers:wiz.analyzers.map(a=>({id:a.id,title:a.title,api_url:a.api_url,discover_url:"",
+      mandatory:!!a.mandatory,enabled:true,timeout:a.timeout||120})),
+  };
+  wizMsg("creating…","");
+  try{
+    const d=await (await fetch(API+"config",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(cfg)})).json();
+    if(!d.ok){ wizMsg("rejected: "+d.error,"err"); return; }
+    RAW=cfg; rawMode=false;
+    $("#rawView").style.display="none"; $("#formView").style.display="block"; buildForm();
+    $("#wizModal").classList.remove("show");
+    toast(`MCP tool "${wiz.name}" created and live`,"ok");
+    await poll(); selectedTool=wiz.name; selectedJob=null; renderTabs(); renderTemplate(wiz.name);
+  }catch(e){ wizMsg("network error: "+e.message,"err"); }
+}
 
-function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function clip(s,n){s=String(s??"");return s.length>n?s.slice(0,n-1)+"…":s;}
-poll();
+/* ---------------------------- keyboard ---------------------------- */
+window.addEventListener("keydown", e=>{
+  if(e.key==="Escape"){
+    const open=$$(".modal.show");
+    if(open.length){ open.forEach(m=>m.classList.remove("show")); return; }
+    if($("#inspector").classList.contains("open")) closeInspector();
+  }
+  if(e.key==="1"&&e.altKey) setView("flow");
+  if(e.key==="2"&&e.altKey) setView("dash");
+  if(e.key==="3"&&e.altKey) setView("hist");
+});
+$$(".modal").forEach(m=>m.addEventListener("mousedown", e=>{ if(e.target===m) m.classList.remove("show"); }));
+
+/* ---------------------------- boot ---------------------------- */
+poll().then(applyHash);
 </script>
 </body>
 </html>

@@ -8,8 +8,12 @@ are two things you might add.
 
 Prerequisite for either: the analyzer must speak the **standard contract** in
 [`analyzer_api.md`](analyzer_api.md) — `GET <base>/discover` and `POST <query.path>`. If it does,
-the orchestrator can already discover it, let DeepSeek pick it, call it, and fold in its report.
-Nothing in `orchestrator/` changes.
+the orchestrator can already discover it, let the **AI Controller** pick it *and work out how to
+call it*, then fold in its report. Nothing in `orchestrator/` changes.
+
+> Your analyzer does **not** have to use the `file` + `question` shape. Declare whatever params
+> you accept in your discovery and they will be used — see
+> [`analyzer_api.md` §7](analyzer_api.md#7-changing-your-api-without-breaking-callers).
 
 ---
 
@@ -18,9 +22,14 @@ Nothing in `orchestrator/` changes.
 ### 1a. Make sure your analyzer follows the contract
 It must expose the two endpoints and return `AnalyzerResult` with a fully-formatted
 `report_markdown`. Copy `fakes/fake_analyzer.py` as a starting point — it's a complete, correct
-analyzer in ~60 lines. The single most important field is **`analyzer.when_to_use`** in your
-discovery: it is exactly what DeepSeek reads to decide whether to call you. Write it like a
-routing rule ("Use for … / do NOT use for …").
+analyzer in ~60 lines. (`fakes/fake_analyzer_v2.py` shows the same contract with a completely
+different request shape.) Two fields carry the most weight:
+
+- **`analyzer.when_to_use`** — exactly what the AI Controller reads to decide whether to call you.
+  Write it like a routing rule ("Use for … / do NOT use for …").
+- **`query.params[].description`** (and `default`) — what the AI Controller reads when it has to
+  choose a value for a param. Any **required** param should also declare a `default`, so the
+  no-AI fallback path still sends something correct.
 
 ### 1b. Add one entry to `config/tool_enablement.json`
 Under the tool's `analyzers` array:
@@ -31,33 +40,34 @@ Under the tool's `analyzers` array:
   "title": "Performance Analyzer",
   "api_url": "https://vista.fortinet.com/perf",   // your analyzer's base URL
   "discover_url": "",                 // empty ⇒ derived as api_url + "/discover"
-  "mandatory": false,                 // false ⇒ DeepSeek decides; true ⇒ always called
+  "mandatory": false,                 // false ⇒ the AI Controller decides; true ⇒ always called
   "enabled": true,                    // false ⇒ ignored entirely
   "timeout": 120
 }
 ```
 
 - **`mandatory: true`** — always called for this tool (e.g. LogV's own analysis).
-- **`mandatory: false`** — called only when this tool's DeepSeek routing selects it, based on
-  your `when_to_use`.
-- If, after this edit, the tool has **≥1 optional** analyzer, DeepSeek routing turns on
-  automatically; with **0 optional** it stays skipped. You don't manage that — it's derived.
+- **`mandatory: false`** — called only when this tool's AI Controller routing selects it, based
+  on your `when_to_use`.
+- The AI Controller runs either way — with 0 optional analyzers it still reads your live contract
+  and plans the call (`plan-only` mode). You don't manage that; it's automatic.
 
-### 1c. (Optional) tune the tool's routing so DeepSeek picks it well
+### 1c. (Optional) tune the tool's routing so the AI Controller picks it well
 Edit that tool's **`routing_system_prompt`** to mention when the new companion is relevant. This
-is the per-tool DeepSeek guidance; keep it about *routing* (the fixed JSON output format is added
+is the per-tool guidance; keep it about *routing* (the fixed JSON output format is added
 automatically). Example addition: *"…for questions about interface throughput or bandwidth
 saturation, add the performance analyzer."*
 
 ### 1d. Apply it
 - **Via the GUI (easiest):** open `http://<host>:<port>/gui` → **Add / Edit Tools** → under the
-  tool, **+ add analyzer**, fill the row, **Save & reload**. It validates and hot-reloads — no
-  restart.
+  tool, **＋ add analyzer**, paste the base URL, press **🔌 Test & autofill** (it calls your
+  `/discover`, confirms the contract and fills in id/title while showing your `when_to_use`), pick
+  mandatory/optional, **Save & reload**. It validates and hot-reloads — no restart.
 - **By hand:** edit the JSON and either restart the server or `POST /gui/api/config` (the GUI
   Save does this). The loader also hot-reloads via `tool_enablement.reload()`.
 
-That's it. Discovery, DeepSeek selection, the parallel call, concatenation, and ORB all work with
-your analyzer immediately.
+That's it. Discovery, selection, invocation planning, the parallel call, concatenation, and ORB
+all work with your analyzer immediately. See [`gui_guide.md`](gui_guide.md) for the console.
 
 ---
 
@@ -72,15 +82,17 @@ immediately, with no code and no restart.**
 ### The one supported way: the GUI
 Open `/gui` (or `/mcp/gui`) → **Add / Edit Tools** → **+ add tool**:
 1. Give it a name (this is the `list_tools` name, e.g. `Config_Generator`).
-2. Fill its **description** (what clients read), its **routing system prompt** (its DeepSeek
+2. Fill its **description** (what clients read), its **routing system prompt** (its AI Controller
    analyzer-selection prompt), and toggle **ORB**.
-3. Add its **analyzers** (id, title, api_url, mandatory/optional, enabled, timeout).
-4. **Save & reload.**
+3. Add its **analyzers** — paste each base URL and press **🔌 Test & autofill**, then mark
+   mandatory/optional and set a timeout.
+4. **Create tool.**
 
-On save the server validates the config, writes `config/tool_enablement.json`, and calls
-`sync_tools()` (via a config-change listener) which registers the new MCP tool live. The tool is
-now in `list_tools`, callable, and has its own flow in the GUI. Removing a tool unregisters it;
-editing its description refreshes it — all without a restart.
+On save the server validates the config, writes `config/tool_enablement.json`, calls
+`sync_tools()` (via a config-change listener) which registers the new MCP tool live, and records
+an audit row in the database. The tool is now in `list_tools`, callable, and has its own flow in
+the console. Removing a tool unregisters it; editing its description refreshes it — all without a
+restart.
 
 > This is the intended workflow: **the GUI is the only place tools, analyzers, and prompts are
 > added or changed.** Hand-editing `config/tool_enablement.json` still works (the GUI just edits
@@ -103,9 +115,12 @@ config at startup and on every save.
 
 - [ ] Analyzer implements `GET /discover` + `POST <query.path>` per [`analyzer_api.md`](analyzer_api.md)
 - [ ] `when_to_use` is written as a precise routing rule
+- [ ] every param is declared, with a `description`; every **required** param has a `default`
+- [ ] **🔌 Test & autofill** in the GUI returns green for the analyzer's base URL
 - [ ] Tool/analyzer added **in the GUI** (Add / Edit Tools) — description, routing prompt, analyzers
 - [ ] (optional) tool's `routing_system_prompt` mentions the new companion
-- [ ] **Save & reload** — verified live in `/gui`, the Integrations popup, and `list_tools` (no restart)
+- [ ] **Save & reload** — verified live in `/gui`, the Integrations panel, and `list_tools` (no restart)
+- [ ] the job's AI Controller node shows the request that was planned for your analyzer
 
 *(The older `docs/ADDING_ANALYZERS.md` describes the pre-rearchitecture subclass pattern and is
 superseded by this document and `analyzer_api.md`.)*

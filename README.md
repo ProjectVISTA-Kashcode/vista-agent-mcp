@@ -13,15 +13,22 @@ the one whose purpose matches the task.
 gets back **one text report** — no client-visible change.
 
 > **Architecture (current):** each MCP tool is a thin entry point into a **config-driven
-> orchestrator**. It discovers a set of standard **analyzers**, lets **DeepSeek** pick which
-> optional ones fit the question, calls them **in parallel**, concatenates their reports, and
-> appends **ORB** troubleshooting — with **no per-analyzer code**. Adding capability is a config
-> edit. Full details:
+> orchestrator**. On every call it discovers a set of standard **analyzers**, and an
+> **AI Controller** decides which optional ones fit the question **and how to call each one from
+> the contract it just discovered**; they run **in parallel**, their reports are concatenated, and
+> **ORB** troubleshooting is appended — with **no per-analyzer code**. Adding capability is a
+> config edit. Every job is stored in Postgres. Full details:
 > - [docs/Architecture.md](docs/Architecture.md) — the whole design and flow
 > - [docs/analyzer_api.md](docs/analyzer_api.md) — the standard analyzer contract every analyzer follows
 > - [docs/how_to_add_analyzer.md](docs/how_to_add_analyzer.md) — add an analyzer or a whole new tool (config, no code)
+> - [docs/gui_guide.md](docs/gui_guide.md) — the operator console: Flow · Dashboard · History
+> - [docs/db_setup.md](docs/db_setup.md) — durable job history (the prod `psql` commands)
 > - [docs/testing.md](docs/testing.md) — run & test locally, with commands
-> - **Flow GUI** at **`/gui`** — live n8n-style flow of every job + a TOOL_ENABLEMENT / routing-prompt editor
+> - **Console** at **`/gui`** — live flow of every job, dashboard analytics, searchable history,
+>   and the TOOL_ENABLEMENT / routing-prompt editor. It also serves two standalone pages:
+>   **`/gui/user-guide`** (how to drive the console) and **`/gui/api-integration-guide`**
+>   (the API an analyzer must expose to plug in) — both also under `/mcp/gui/…`
+> - [changes.md](changes.md) — what changed in the latest revision, and why
 >
 > *(The older `analyzers/` module and `docs/ADDING_ANALYZERS.md` describe the superseded
 > one-subclass-per-tool proxy pattern; the orchestrator replaced it.)*
@@ -82,19 +89,26 @@ VISTA-MCP/
 ├── server.py                    # FastMCP server: /mcp route, bearer auth, log fetch → orchestrator; mounts /gui
 ├── config/tool_enablement.json  # TOOL_ENABLEMENT — per-tool: description, routing_system_prompt, orb, analyzers[]
 ├── orchestrator/                # the config-driven core (no per-analyzer code)
-│   ├── models.py                #   the standard contract + ToolConfig/AnalyzerRef/Decision/Job
+│   ├── models.py                #   the standard contract + ToolConfig/AnalyzerRef/CallPlan/Decision/Job
 │   ├── tool_enablement.py       #   load/save the per-tool config (cached, hot-reload)
-│   ├── vfr.py                   #   VFR — passthrough today (real routing seam; see Architecture.md §9)
-│   ├── discovery.py             #   GET /discover for all analyzers (concurrent, fail-soft)
-│   ├── deepseek.py · decide.py  #   DeepSeek routing + skip-logic + per-tool prompt composition
-│   ├── analyzer_client.py       #   the ONE generic call → AnalyzerResult
+│   ├── vfr.py                   #   VFR — passthrough today (real routing seam; see Architecture.md §11)
+│   ├── discovery.py             #   GET /discover for all analyzers (concurrent, fail-soft) + probe()
+│   ├── ai_controller.py         #   the AI gateway client (fail-safe)
+│   ├── decide.py · plan.py      #   ALWAYS-ON decision: pick optional analyzers + plan every call
+│   │                            #   from live discovery, then validate the plan against it
+│   ├── analyzer_client.py       #   the ONE generic call — executes a validated plan
 │   ├── orb.py · pipeline.py     #   ORB (fail-open) + the whole flow wired together
-│   └── jobs.py · gui.py         #   job/flow registry (CLI logs) + the /gui routes
-├── gui/index.html               # the single-page n8n-style flow GUI (red/white)
-├── fakes/fake_analyzer.py       # a real analyzer following the contract, for local testing (+ run_fakes.sh)
+│   ├── jobs.py · db.py          #   job/flow registry (CLI logs) + durable history in Postgres
+│   └── gui.py                   #   the /gui routes (state, history, analytics, config, probe)
+├── gui/index.html               # the operator console — Flow · Dashboard · History (red/white, dark mode)
+├── gui/user_guide.html          # served at /gui/user-guide            (console walkthrough)
+├── gui/api_guide.html           # served at /gui/api-integration-guide (analyzer contract)
+├── fakes/fake_analyzer.py       # a reference analyzer following the contract (+ run_fakes.sh)
+├── fakes/fake_analyzer_v2.py    # the same contract with a DIFFERENT request shape (dynamic-discovery test)
 ├── client_test.py               # end-to-end MCP client (serves a log, list_tools, call_tool)
 ├── test_data/                   # sample SD-WAN logs
-├── docs/                        # Architecture.md · analyzer_api.md · how_to_add_analyzer.md · testing.md
+├── docs/                        # Architecture.md · analyzer_api.md · how_to_add_analyzer.md ·
+│                                # gui_guide.md · db_setup.md (+ .sql) · testing.md
 ├── analyzers/                   # SUPERSEDED pre-orchestrator subclass pattern (kept for reference)
 └── starter_kit/                 # the partner team's original example (reference, untouched)
 ```
@@ -157,17 +171,29 @@ can reach the client at>`.)*
 | `ORB_ASK_URL` | `http://172.17.96.58:9345/orb/api/ask` | ORB "ask" API queried after the analysis for troubleshooting steps |
 | `ORB_USERNAME` | `logV_mcp_call` | `username` sent to ORB |
 | `ORB_TIMEOUT` | `180` | ORB request timeout (s) — ORB is deep-research and slow (~45–140 s); fail-open on timeout |
+| `AI_CONTROLLER_ENABLED` | `1` | `0` turns the AI Controller off — routing and every request fall back to the deterministic, discovery-built policy |
+| `AI_CONTROLLER_GEN_URL` | `https://vista.fortinet.com/ai-mcp/ds4/generate` | AI gateway used for the routing + invocation decision (legacy name `DEEPSEEK_GEN_URL` still honoured) |
+| `AI_CONTROLLER_FALLBACK_URL` | `https://vista.fortinet.com/ai-mcp/generate` | secondary gateway (legacy `ANALYSIS_API_URL`) |
+| `AI_CONTROLLER_TIMEOUT` | `60` | gateway read timeout (s) (legacy `DEEPSEEK_TIMEOUT`) |
+| `DATABASE_URL` | _(unset)_ | Postgres for durable job history + console analytics, e.g. `postgresql+psycopg://user:pass@host:5432/usage_logs`. Unset ⇒ history off, everything else unchanged. See [docs/db_setup.md](docs/db_setup.md) |
+| `MCP_DB_AUTO_CREATE` | `1` | `0` skips `CREATE TABLE IF NOT EXISTS` (prod: create the schema by hand) |
+| `MCP_DB_STORE_REPORTS` | `1` | `0` stores report lengths but not the text |
+| `MCP_JOBS_MEMORY` | `60` | how many recent jobs the live console keeps in memory |
 
 Every tool call logs the full flow to the terminal with a correlation id:
 
 ```
-[110877fa] ▶ TOOL CALL  Log_Analyzer_Visualizer  question='SLA failures on Austin'  source_url=http://…/sdwan.log
-[110877fa] fetch: GET http://…/sdwan.log (streaming, cap 52,428,800B)
-[110877fa] fetch: done — 577,618 bytes, filename='sdwan-small.log' in 0.02s
-[110877fa] forward → LogV: POST …/filter_analyze_visualyze_logs  (question=yes, file=577,618B, spa_base=…)
-[110877fa] forward: LogV responded HTTP 200 in 17.32s
-[110877fa] LogV result: log_type=System:sdwan  filter.matched=50/948  analysis=4,316chars  session_id=21b2ece7-…  iframe=yes
-[110877fa] ◀ TOOL CALL done — returning 5,177-char report in 17.34s
+[633d5f5b] ▶ TOOL CALL  Log_Analyzer_Visualizer  question='SLA failures for LO_C1_2 and High CPU'  source_url=http://…/sdwan.log
+[633d5f5b] fetch: done — 13,885,720 bytes, filename='DEMO_LOG_VISUALIZER_SDWAN.log' in 0.31s
+[633d5f5b]   ✔ [tool_enablement] ok mandatory=['logv']  optional=['perf']  orb=on
+[633d5f5b]   ✔ [discover] ok discovered=['logv', 'perf']
+[633d5f5b]   → [ai_controller] asking (4,068-char prompt · mode=select+plan · mandatory=['logv'] optional=['perf'])
+[633d5f5b]   ✔ [ai_controller] ok (21022ms) The user asks about 'High CPU', which is a performance concern…
+[633d5f5b]   → call[logv] POST …/agent_assist/run  (file=13,885,720B → file, fields=['question'], plan=ai)
+[633d5f5b]   → call[perf] POST …/perf/run          (file=13,885,720B → file, fields=['question'], plan=ai)
+[633d5f5b]   ✔ [concat] ok 2 section(s), 7,568 chars
+[633d5f5b]   ✔ [orb] ok (38214ms) 11,159 chars appended
+[633d5f5b] ◀ JOB DONE  report=18,749 chars in 86.2s
 ```
 
 ---
@@ -234,11 +260,20 @@ They register the server, wire `source_url` to their signed-URL injector, and en
 - **Proxy, not a re-implementation.** VISTA-MCP holds no analysis logic; it forwards to the
   analyzer's API and formats the reply. The Log Visualizer decides the log subtype (SD-WAN
   today) and how to handle it — VISTA-MCP just surfaces the result (including "not supported").
-- **Pluggable analyzers.** `analyzers/base.Analyzer` is the contract: `name`, `log_field`,
-  `description()`, `analyze(log_bytes, filename, question) -> str`. One subclass per backend,
-  one tool per subclass. See [docs/ADDING_ANALYZERS.md](docs/ADDING_ANALYZERS.md).
+- **Pluggable analyzers, discovered live.** The contract is
+  [docs/analyzer_api.md](docs/analyzer_api.md): `GET <base>/discover` + `POST <query.path>`. The
+  orchestrator holds one discover function, one call function and one read path, and learns each
+  analyzer's request shape from its discovery **on every call** — so an analyzer can change its
+  API without a change here. Adding one is a config edit in the console.
+- **The model can propose, never decide alone.** The AI Controller's request plan is validated
+  field-by-field against the analyzer's own discovery before anything is sent; anything not
+  advertised is corrected or dropped, and the correction is recorded.
+- **Fail-safe everywhere.** No AI gateway ⇒ deterministic routing + discovery-built requests.
+  No ORB ⇒ report without it. No database ⇒ live view only. One analyzer down ⇒ the others
+  still answer.
 - **Bounded output.** The report is text; the analysis is already reduced by the backend.
-- **Stateless per call.** Fetch → forward → return; nothing is stored.
+- **Stateless per call for the log.** Fetch → forward → return; the log itself is never stored.
+  Job *metadata* and reports are persisted for the console's history and analytics.
 - **Framework.** FastMCP (runs on an ASGI/Starlette app via uvicorn) implements the MCP
   protocol and the `/mcp/` HTTP transport — the same framework the partner's starter kit uses.
 
@@ -246,7 +281,7 @@ They register the server, wire `source_url` to their signed-URL injector, and en
 
 | Scenario | Result |
 |---|---|
-| `list_tools` | 1 tool `Log_Analyzer_Visualizer`, inputs `source_url` (required) + `question` |
+| `list_tools` | every configured tool (`Log_Analyzer_Visualizer` today), inputs `source_url` (required) + `question` |
 | With question (SD-WAN) | filter block (matched N/total) + LogV link + analysis + **ORB Suggestions** + iframe URL |
 | No question (SD-WAN) | LogV link + analysis + **ORB Suggestions** + iframe URL (no filter block) |
 | ORB Suggestions section | troubleshooting steps directly relevant to the findings, **added by this MCP layer between the analysis and the visualization** (fail-open) |
@@ -255,3 +290,7 @@ They register the server, wire `source_url` to their signed-URL injector, and en
 | 14 MB log | streamed + processed (29,169 logs) |
 | Internal engine name | scrubbed (0 mentions in output) |
 | Wrong/missing bearer token | **401 Unauthorized** |
+| AI Controller | runs on **every** job — `select+plan` with optional analyzers, `plan-only` without; never skipped |
+| Analyzer with a different contract | called correctly with no code change (renamed file/question params, an extra required param, a different path) |
+| AI gateway unreachable | fail-safe: all optional analyzers run, requests built from discovery, client output unaffected |
+| Job history | every job + step + per-analyzer request/result + final report in Postgres, replayable in the console after a restart |

@@ -9,20 +9,18 @@ debug-command helpers, End-of-Support & lifecycle lookups, and more over time. T
 independent and varied: each declares its own inputs and returns its own text — **not all take
 a log or return a visualization**.
 
-Some tools (like the log analyzer) follow a **proxy** pattern — fetch a platform-injected input,
-forward it to that tool's own backend API, and return one text report; that pattern lives in
-`analyzers/` (the `Analyzer` base + one subclass per backend). Tools that don't forward to a
-backend can be added as plain `@mcp.tool` functions.
+Every tool here is a thin entry point into the **config-driven orchestrator**
+(`orchestrator/`): fetch the platform-injected input, then run VFR → TOOL_ENABLEMENT →
+DISCOVER → **AI CONTROLLER** → analyzers (in parallel) → concatenate → ORB → answer. Tools are
+registered from `config/tool_enablement.json`, so adding one is a config edit made in the GUI —
+no code and no restart (see docs/how_to_add_analyzer.md).
 
 Tools today:
   * `Log_Analyzer_Visualizer` → Log Visualizer "AgentAssist" API (FortiGate SD-WAN today).
 
-Adding a backend-backed tool = one `Analyzer` subclass + one small tool function here
-(see docs/ADDING_ANALYZERS.md). The MCP protocol, auth, log-fetch, and SSRF guard are shared.
-
 Run:
     pip install -r requirements.txt
-    python server.py            # serves at http://0.0.0.0:8100/mcp/
+    python server.py            # serves at http://0.0.0.0:8100/mcp/  (GUI at /gui)
 
 Config (env; a .env file is auto-loaded if python-dotenv is installed):
     MCP_HOST                 default 0.0.0.0
@@ -44,9 +42,19 @@ Config (env; a .env file is auto-loaded if python-dotenv is installed):
                              default http://127.0.0.1:8802/logVisualizer/api/agent_assist
     LOGV_VIEW_BASE           SPA base for the returned session links/iframe
                              default https://vista.fortinet.com/logVisualizer
+    AI_CONTROLLER_ENABLED    '0' disables the AI Controller (deterministic routing + calls
+                             built straight from each analyzer's discovery). Default on.
+    AI_CONTROLLER_GEN_URL    AI gateway used for the routing/invocation decision
+    AI_CONTROLLER_TIMEOUT    gateway read timeout, seconds (default 60)
+    DATABASE_URL             Postgres for durable job history + GUI analytics, e.g.
+                             postgresql+psycopg://user:pass@host:5432/usage_logs
+                             (unset ⇒ history off; the server runs exactly as before)
+    MCP_DB_AUTO_CREATE       '0' to skip CREATE TABLE IF NOT EXISTS (schema managed by hand;
+                             see docs/db_setup.md)
 """
 from __future__ import annotations
 
+import atexit
 import ipaddress
 import os
 import re
@@ -70,7 +78,7 @@ except Exception:  # noqa: BLE001
 
 import tlsconf
 import vlog
-from orchestrator import gui, jobs, pipeline, tool_enablement
+from orchestrator import ai_controller, db, gui, pipeline, tool_enablement
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -149,12 +157,6 @@ TOOL_DESCRIPTION = (
     "interactive dashboard link, plus troubleshooting suggestions and any relevant companion "
     "analyses. It auto-detects the log's event type and routes internally."
 )
-
-
-def _tool_description(tool_name: str, fallback: str) -> str:
-    """The client-facing description for a tool — from its config, else the code fallback."""
-    cfg = tool_enablement.get(tool_name)
-    return (cfg.description.strip() if cfg and cfg.description.strip() else fallback)
 
 
 # --------------------------------------------------------------------------- #
@@ -378,7 +380,12 @@ def sync_tools(cfg: dict | None = None) -> None:
 sync_tools()
 tool_enablement.on_change(sync_tools)
 
-# Flow GUI — an in-process operator console (live jobs + n8n-style flow + TOOL_ENABLEMENT editor),
+# Durable job history (Postgres). Fail-open: if the database is unreachable the server runs
+# exactly as before — the live GUI still works, only history/analytics are unavailable.
+db.init()
+atexit.register(db.shutdown)
+
+# Operator console — live flow + dashboard analytics + durable history + TOOL_ENABLEMENT editor,
 # served at BOTH /gui and /mcp/gui. Shares the in-memory job registry with the pipeline.
 gui.register(mcp)
 
@@ -396,6 +403,12 @@ if __name__ == "__main__":
                      f"{'' if _a.enabled else '(disabled) '}→ {_a.api_url}")
         vlog.log(f"      ORB: {'ON' if _cfg.orb_enabled else 'OFF'}"
                  f"  ·  routing prompt: {'custom' if _cfg.routing_system_prompt.strip() else 'default'}")
+    _dbs = db.status()
+    vlog.log(f"  AI Controller    : {'ON → ' + ai_controller.GEN_URL if ai_controller.ENABLED else 'OFF (deterministic routing + discovery-built calls)'}"
+             + (f"  (timeout {ai_controller.TIMEOUT:.0f}s)" if ai_controller.ENABLED else ""))
+    vlog.log(f"  job history (DB) : "
+             + (f"ON → {_dbs['url']}" if _dbs["connected"] else
+                ("OFF — " + (_dbs["last_error"] or "no DATABASE_URL / disabled"))))
     vlog.log(f"  auth             : {'Bearer token (StaticTokenVerifier)' if auth else 'DISABLED ⚠️ (MCP_ALLOW_INSECURE)'}")
     vlog.log(f"  private fetch     : {'ALLOWED (dev)' if ALLOW_PRIVATE_FETCH else 'blocked (SSRF guard)'}")
     vlog.log(f"  outbound TLS     : {tlsconf.describe()}")

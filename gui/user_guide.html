@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VISTA-MCP · User Guide</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --panel2:#fafbfc; --panel3:#f2f4f7;
+    --ink:#11161d; --ink2:#39414d; --muted:#626c7a; --faint:#8b95a3;
+    --line:#e2e6ec; --line2:#eef1f5;
+    --red:#e11d2a; --red-dark:#b3121d; --red-soft:#fdecec; --red-tint:#fef6f6;
+    --ok:#0f8a4d; --ok-soft:#e6f6ed; --skip:#b7791f; --skip-soft:#fdf4e3;
+    --err:#c81e1e; --err-soft:#fdeceb; --info:#2563eb; --info-soft:#e8efff;
+    --shadow-1:0 1px 2px rgba(16,20,28,.06),0 1px 3px rgba(16,20,28,.05);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --r-sm:7px; --r-md:10px; --r-lg:14px;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c1015; --panel:#141a21; --panel2:#191f28; --panel3:#1f2631;
+    --ink:#e8eef5; --ink2:#c2ccd8; --muted:#94a0ae; --faint:#6f7b8a;
+    --line:#28303b; --line2:#212832;
+    --red:#ff4a55; --red-dark:#e11d2a; --red-soft:rgba(255,74,85,.16); --red-tint:rgba(255,74,85,.07);
+    --ok:#3fb950; --ok-soft:rgba(63,185,80,.16); --skip:#e3b341; --skip-soft:rgba(227,179,65,.15);
+    --err:#f85149; --err-soft:rgba(248,81,73,.16); --info:#589bff; --info-soft:rgba(88,155,255,.15);
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14.5px;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--red);text-decoration:none} a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--red);outline-offset:2px;border-radius:4px}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:2px solid transparent;background-clip:content-box}
+
+  header{position:sticky;top:0;z-index:10;height:56px;display:flex;align-items:center;gap:14px;
+    padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--red)}
+  .brand{font-weight:800;display:flex;align-items:center;gap:10px;font-size:15px;white-space:nowrap}
+  .brand .logo{width:28px;height:28px;border-radius:9px;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-weight:900;font-size:14px;box-shadow:0 2px 8px rgba(225,29,42,.35)}
+  .brand small{color:var(--muted);font-weight:600;font-size:11.5px}
+  .spacer{flex:1}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:7px 12px;font-size:12.5px;font-weight:650;display:inline-flex;align-items:center;gap:7px;
+    cursor:pointer;font-family:inherit;white-space:nowrap}
+  .btn:hover{border-color:var(--red);color:var(--red);background:var(--red-tint);text-decoration:none}
+
+  .layout{display:flex;max-width:1280px;margin:0 auto;gap:34px;padding:28px 20px 80px}
+  nav.toc{position:sticky;top:84px;align-self:flex-start;width:236px;min-width:236px;font-size:13px}
+  nav.toc .t{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint);
+    font-weight:750;margin-bottom:9px}
+  nav.toc a{display:block;padding:5px 10px;border-radius:6px;color:var(--ink2);border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel3);color:var(--red);text-decoration:none}
+  main{flex:1;min-width:0}
+
+  h1{font-size:27px;font-weight:800;letter-spacing:-.5px;margin:0 0 6px}
+  .lede{color:var(--muted);font-size:15px;margin:0 0 26px;max-width:78ch}
+  h2{font-size:19px;font-weight:750;margin:38px 0 10px;padding-top:8px;scroll-margin-top:78px;
+    display:flex;align-items:center;gap:10px}
+  h2 .num{width:25px;height:25px;border-radius:7px;background:var(--red);color:#fff;font-size:12.5px;
+    display:grid;place-items:center;font-weight:800;flex:0 0 auto}
+  h3{font-size:15px;font-weight:750;margin:22px 0 6px;scroll-margin-top:78px}
+  p{margin:10px 0;max-width:82ch}
+  ul,ol{padding-left:22px;margin:10px 0;max-width:82ch}
+  li{margin:5px 0}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--panel3);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;
+    overflow-x:auto;box-shadow:var(--shadow-1);margin:12px 0}
+  pre code{background:none;border:0;padding:0;font-size:12.5px;line-height:1.6}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
+    padding:16px 18px;box-shadow:var(--shadow-1);margin:14px 0}
+  .note{background:var(--info-soft);border-left:3px solid var(--info);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  .warn{background:var(--skip-soft);border-left:3px solid var(--skip);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  .good{background:var(--ok-soft);border-left:3px solid var(--ok);border-radius:0 8px 8px 0;
+    padding:11px 15px;margin:14px 0;font-size:13.5px;color:var(--ink2);max-width:82ch}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);
+    font-weight:750;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  td{padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  .step{display:flex;gap:13px;margin-bottom:12px;align-items:flex-start;max-width:82ch}
+  .step .n{flex:0 0 auto;width:25px;height:25px;border-radius:50%;background:var(--red);color:#fff;
+    display:grid;place-items:center;font-size:12px;font-weight:800}
+  .flowline{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:16px 0;font-size:12.5px}
+  .flowline .s{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:5px 12px;font-weight:650;box-shadow:var(--shadow-1)}
+  .flowline .s.hi{border-color:var(--red);color:var(--red)}
+  .flowline .arr{color:var(--faint)}
+  .kbd{font-family:var(--mono);font-size:11.5px;background:var(--panel3);border:1px solid var(--line);
+    border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+  footer{border-top:1px solid var(--line);margin-top:48px;padding:20px;text-align:center;
+    color:var(--faint);font-size:12.5px}
+  @media (max-width:900px){ nav.toc{display:none} .layout{padding:20px 16px 60px} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">V</span>VISTA-MCP <small>· User Guide</small></div>
+  <div class="spacer"></div>
+  <a class="btn" href="./api-integration-guide">🔌 API Integration Guide</a>
+  <a class="btn" href="./">← Console</a>
+  <button class="btn" id="themeBtn" title="Toggle dark mode">🌙</button>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <div class="t">On this page</div>
+  <a href="#what">1 · What this console is</a>
+  <a href="#pipeline">2 · What a job actually does</a>
+  <a href="#flow">3 · Flow view</a>
+  <a href="#inspector">4 · The node inspector</a>
+  <a href="#log">5 · The CLI log</a>
+  <a href="#addtool">6 · Add a new MCP tool</a>
+  <a href="#addanalyzer">7 · Add an analyzer</a>
+  <a href="#ai">8 · The AI Controller</a>
+  <a href="#dash">9 · Dashboard</a>
+  <a href="#hist">10 · History</a>
+  <a href="#links">11 · Shortcuts &amp; deep links</a>
+  <a href="#trouble">12 · Troubleshooting</a>
+  <a href="#security">13 · Security</a>
+</nav>
+
+<main>
+  <h1>Using the VISTA-MCP console</h1>
+  <p class="lede">
+    The operator surface for the orchestrator. Watch every job execute step by step, see exactly
+    what each analyzer was sent and returned, search the whole history, and add or change tools,
+    analyzers and routing prompts — <b>without touching code or restarting the server</b>.
+  </p>
+
+  <h2 id="what"><span class="num">1</span>What this console is</h2>
+  <p>
+    VISTA-MCP is an MCP server. A partner agent calls one of its tools with a log file and a
+    question, and gets back one text report. Behind that single call is a pipeline: discover the
+    available analyzers, decide which ones this question needs, call them in parallel, combine
+    their reports, and append ORB troubleshooting.
+  </p>
+  <p>This console shows you that pipeline — live and historically — and lets you change it.</p>
+  <table>
+    <thead><tr><th>View</th><th>What it's for</th></tr></thead>
+    <tbody>
+      <tr><td><b>⛓ Flow</b></td><td>The live canvas — one job or one tool's template, animating as it runs</td></tr>
+      <tr><td><b>📈 Dashboard</b></td><td>Analytics over the stored history: volume, success rate, latency, per-tool and per-analyzer behaviour, errors</td></tr>
+      <tr><td><b>🗂 History</b></td><td>The searchable permanent record — find any job from any point in the past and replay it</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    Everything you change here is written to <code>config/tool_enablement.json</code>, validated,
+    hot-reloaded into the running server, and audited to the database.
+  </div>
+
+  <h2 id="pipeline"><span class="num">2</span>What a job actually does</h2>
+  <div class="flowline">
+    <span class="s">📥 intake</span><span class="arr">→</span>
+    <span class="s">🧭 VFR</span><span class="arr">→</span>
+    <span class="s">⚙️ tool enablement</span><span class="arr">→</span>
+    <span class="s">🔎 discover</span><span class="arr">→</span>
+    <span class="s hi">🧠 AI Controller</span><span class="arr">→</span>
+    <span class="s">📊 analyzers (parallel)</span><span class="arr">→</span>
+    <span class="s">🧩 concat</span><span class="arr">→</span>
+    <span class="s">🛟 ORB</span><span class="arr">→</span>
+    <span class="s">✅ answer</span>
+  </div>
+  <table>
+    <thead><tr><th>Node</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td><b>Tool Call &amp; Fetch</b></td><td>The MCP call as received, plus the log fetched from the platform-injected <code>source_url</code>.</td></tr>
+      <tr><td><b>VFR (routing)</b></td><td>Vetting &amp; flow routing — a pre-flight file check. A passthrough today; the seam is in place for real logic.</td></tr>
+      <tr><td><b>Tool Enablement</b></td><td>This tool's config: which analyzers exist, which are mandatory, whether ORB runs.</td></tr>
+      <tr><td><b>Discover Tools</b></td><td><code>GET /discover</code> on every configured analyzer, concurrently. This is where each analyzer's <i>current</i> API contract comes from.</td></tr>
+      <tr><td><b>AI Controller</b></td><td>Picks which optional analyzers to add <b>and</b> plans how to call each one, from the contract just discovered. Runs on every job — see <a href="#ai">§8</a>.</td></tr>
+      <tr><td><b>Analyzer nodes</b></td><td>The selected analyzers, called in parallel. Each returns a finished markdown section.</td></tr>
+      <tr><td><b>Concatenate</b></td><td>Every analyzer's report joined with a horizontal rule. Nothing is rewritten.</td></tr>
+      <tr><td><b>ORB Suggestions</b></td><td>Troubleshooting, asked once at the end with the combined report + the user's question. Fail-open.</td></tr>
+      <tr><td><b>Answer &amp; Back</b></td><td>The single text report handed to the MCP client.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="flow"><span class="num">3</span>Flow view</h2>
+  <ul>
+    <li><b>Tool tabs</b> (top) preview a tool's flow <i>shape</i> before any job runs — its
+      analyzers, whether ORB is on, whether it has a custom routing prompt.</li>
+    <li><b>Recent jobs</b> (left) lists in-flight and past runs, newest first, straight from the
+      database — so it survives a restart. Scroll to the bottom for a button into the full
+      <b>History</b>.</li>
+    <li><b>Canvas</b> — <b>drag</b> to pan, <b>scroll</b> to zoom, <b>double-click</b> empty space
+      to fit, or use the −/+/fit/100% controls at the bottom right.</li>
+    <li><b>Click any node</b> to open the inspector.</li>
+  </ul>
+  <div class="good">
+    A red pulsing node is running; green is done; amber is skipped; red-filled is an error. Edges
+    animate while the step downstream of them is running.
+  </div>
+
+  <h2 id="inspector"><span class="num">4</span>The node inspector</h2>
+  <p>Clicking a node answers “what did this step actually do?”. What you see depends on the node:</p>
+  <h3>AI Controller</h3>
+  <ul>
+    <li><b>mode</b> — <code>select+plan</code> (there were optional analyzers to choose from) or
+      <code>plan-only</code> (nothing to choose, but the live contracts were still read).</li>
+    <li><b>AI answered</b> — yes, or <i>fail-safe</i> if the gateway didn't respond.</li>
+    <li><b>plan source</b> — <code>ai</code>, <code>ai-corrected</code> or <code>deterministic</code>.</li>
+    <li><b>Planned calls</b> — for every analyzer: the request URL, which param carries the file,
+      which fields were sent, the model's own note, and any corrections validation applied.</li>
+    <li><b>Routing system prompt</b> and <b>Raw AI answer</b> — the full audit trail.</li>
+  </ul>
+  <h3>Analyzer nodes</h3>
+  <ul>
+    <li><b>Request sent</b> — the exact method, URL, content type, file param and fields.</li>
+    <li><b>when_to_use</b> — the text the AI Controller read when deciding about this analyzer.</li>
+    <li><b>Live discovery document</b> — the analyzer's whole contract at the moment it was called.</li>
+    <li><b>Result meta</b> and <b>this analyzer's report</b> — what came back.</li>
+  </ul>
+  <div class="note">
+    Every expandable block has a <b>⤢</b> button that opens it in its own window — handy for long
+    discovery documents and reports, and it stays open while the job keeps updating.
+  </div>
+
+  <h2 id="log"><span class="num">5</span>The CLI log</h2>
+  <p>The bottom drawer mirrors the server terminal for the selected job.</p>
+  <ul>
+    <li><b>Drag its top edge</b> to resize (the height is remembered), or collapse it with <b>▾</b>.</li>
+    <li><b>Filter</b> by free text, or by status (running / ok / skipped / error).</li>
+    <li><b>verbose</b> adds an expander to every line — click <code>▸ N fields</code> to see that
+      event's structured payload.</li>
+    <li><b>📄 report</b> opens the exact text the MCP client received. <b>copy</b> copies the log.</li>
+  </ul>
+  <p>Each line carries a wall-clock time and a relative offset from the start of the job, so you
+     can see immediately where the time went.</p>
+
+  <h2 id="addtool"><span class="num">6</span>Add a new MCP tool</h2>
+  <p>
+    A “tool” is what the MCP client sees in <code>list_tools</code>. It gets its own flow, its own
+    analyzers and its own routing prompt — and it becomes callable the moment you save.
+  </p>
+  <div class="step"><span class="n">1</span><div><b>⚙ Add / Edit Tools → ＋ New tool</b> (or the
+    <b>＋ add tool</b> chip in the tool bar) opens the guided wizard.</div></div>
+  <div class="step"><span class="n">2</span><div>Give it a <b>name</b> — this is the exact
+    <code>list_tools</code> name agents call (letters, digits, <code>_</code>, <code>-</code>) —
+    and a <b>description</b> the calling agent reads to decide whether to call it. Say what it does
+    and that the platform injects the file.</div></div>
+  <div class="step"><span class="n">3</span><div>Write its <b>routing prompt</b> (guidance for the
+    AI Controller when choosing optional analyzers — the JSON output contract is appended
+    automatically, so write freely) and choose whether <b>ORB</b> troubleshooting is appended to
+    its report.</div></div>
+  <div class="step"><span class="n">4</span><div>Add its <b>analyzers</b> — paste a base URL, hit
+    <b>🔌 Test &amp; autofill</b>, mark each mandatory or optional — then <b>Create tool</b>.</div></div>
+  <p>
+    On save the server validates the config, writes it, re-registers the live MCP tool set and
+    records an audit row. The tool is in <code>list_tools</code> immediately, has its own flow, and
+    appears under <b>Integrations</b>. No restart.
+  </p>
+
+  <h2 id="addanalyzer"><span class="num">7</span>Add an analyzer to an existing tool</h2>
+  <p>
+    <b>⚙ Add / Edit Tools</b> → find the tool → <b>＋ add analyzer</b> → paste the base URL →
+    <b>🔌 Test &amp; autofill</b>.
+  </p>
+  <p>
+    The probe calls <code>GET &lt;base&gt;/discover</code> and shows the analyzer's
+    <code>when_to_use</code> — the single most important field, because that is exactly what the AI
+    Controller reads when deciding whether to call it. Then pick the role:
+  </p>
+  <ul>
+    <li><b>mandatory</b> — always called for this tool.</li>
+    <li><b>optional</b> — called only when the AI Controller judges it relevant to the question.</li>
+  </ul>
+  <div class="good">
+    Nothing else is needed. Discovery, selection, invocation planning, the parallel call,
+    concatenation and ORB all work with your analyzer immediately — as long as it speaks the
+    standard contract. Building one? See the
+    <a href="./api-integration-guide">API Integration Guide</a>.
+  </div>
+  <h3>What gets validated before a save</h3>
+  <ul>
+    <li>tool names match <code>[A-Za-z0-9_-]</code>, up to 64 characters</li>
+    <li>every analyzer has an id and an <code>http(s)</code> <code>api_url</code></li>
+    <li>no duplicate analyzer ids inside a tool</li>
+    <li>every tool has at least one <b>enabled mandatory</b> analyzer — otherwise a call could run nothing</li>
+  </ul>
+  <p>If validation fails the file on disk is left untouched and the message names the problem.
+     <b>⟷ Raw JSON</b> switches the editor to the underlying config and back, for bulk edits.</p>
+
+  <h2 id="ai"><span class="num">8</span>What the AI Controller does</h2>
+  <p>It runs on <b>every</b> job — never skipped — and does two things:</p>
+  <ol>
+    <li><b>Selects</b> which optional analyzers to add, from each one's <code>when_to_use</code>.</li>
+    <li><b>Plans the call</b> for every analyzer that will run, from the contract that analyzer
+      <i>just</i> advertised: method, URL, content type, which param carries the file, which
+      declared params get the question.</li>
+  </ol>
+  <p>
+    That is why an analyzer can rename a param, add a required field or move its endpoint and keep
+    working with no change here — and why a brand-new analyzer added minutes ago is called
+    correctly the first time.
+  </p>
+  <div class="warn">
+    <b>The model proposes; the discovery document decides.</b> Every plan is validated
+    field-by-field before anything is sent — an undeclared field, an unadvertised path, a foreign
+    host or a wrong verb is corrected or dropped, and the correction is listed on the node. If the
+    AI gateway is unavailable the orchestrator falls back to the deterministic policy: run every
+    optional analyzer, build each request straight from discovery.
+  </div>
+
+  <h2 id="dash"><span class="num">9</span>Dashboard</h2>
+  <p>Filter by time range, tool, analyzer, status, AI usage and ORB outcome, plus free text. The
+     filter summary line always states exactly what you're looking at, and <b>Reset</b> clears it.</p>
+  <ul>
+    <li><b>KPI tiles</b> — jobs, success rate, median duration (with p95 and max), how often the AI
+      Controller answered and how often its plans were used as-is, ORB coverage, report volume and
+      bytes analyzed. <b>Click a tile</b> to jump to History with the same filters applied.</li>
+    <li><b>Jobs over time</b> — volume per bucket with errors overlaid and average duration as a line.</li>
+    <li><b>By tool</b> — volume, errors and average duration. Click a row to filter by that tool.</li>
+    <li><b>By analyzer</b> — how often each was selected, its OK/failed counts, average call time,
+      and how many of its requests the AI Controller planned. A rising <b>correction</b> count is
+      the signal that an analyzer's contract has drifted.</li>
+    <li><b>Recent errors</b> — click any row to open that job's flow.</li>
+  </ul>
+
+  <h2 id="hist"><span class="num">10</span>History</h2>
+  <p>
+    The permanent record. Every job is stored with its whole flow: each step, each analyzer's
+    discovery document and the exact request it received, ORB, and the final report.
+  </p>
+  <p>
+    Filter by free text (question, filename, job id, tool), tool, status, analyzer, time range, and
+    whether the AI Controller answered. Click any row to replay that job's flow — nodes, inspector
+    and CLI log exactly as they were, reconstructed from the database even if the server has
+    restarted or the job was produced by a different instance.
+  </p>
+
+  <h2 id="links"><span class="num">11</span>Shortcuts &amp; deep links</h2>
+  <table>
+    <thead><tr><th>Shortcut</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="kbd">Alt</span>+<span class="kbd">1</span>/<span class="kbd">2</span>/<span class="kbd">3</span></td><td>switch to Flow / Dashboard / History</td></tr>
+      <tr><td><span class="kbd">Esc</span></td><td>close a dialog, then the inspector</td></tr>
+      <tr><td>double-click the canvas</td><td>fit the flow to the screen</td></tr>
+    </tbody>
+  </table>
+  <p>Every view is linkable, so a job can be pasted into a ticket:</p>
+<pre><code>#flow  ·  #dash  ·  #hist
+#job=&lt;job_id&gt;                      a specific job's flow
+#job=&lt;job_id&gt;&amp;node=ai_controller   …with a node's inspector already open
+#tool=&lt;Tool_Name&gt;                  a tool's template flow
+#tools  ·  #integrations</code></pre>
+
+  <h2 id="trouble"><span class="num">12</span>Troubleshooting</h2>
+  <table>
+    <thead><tr><th>What you see</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td><b>“dropped” on the Discover node</b></td>
+        <td>That analyzer's <code>/discover</code> didn't answer, so it was skipped for this run.
+            Use <b>🔌 Test &amp; autofill</b> in the editor to see the exact error.</td></tr>
+      <tr><td><b>AI badge says <code>fail-safe</code></b></td>
+        <td>The AI gateway didn't answer. Every optional analyzer ran and each request was built
+            from discovery — the job completed normally, it just had no judgement applied.</td></tr>
+      <tr><td><b><code>plan corrected</code> notes on a node</b></td>
+        <td>The model proposed something the analyzer never advertised; the orchestrator replaced
+            it with the discovered value. Each change is listed.</td></tr>
+      <tr><td><b>An analyzer node is red</b></td>
+        <td>That analyzer failed or timed out. The others still answered — its section is replaced
+            by a short error note. Check the HTTP status in the inspector.</td></tr>
+      <tr><td><b>Dashboard/History say “not connected”</b></td>
+        <td><code>DATABASE_URL</code> isn't set or the database is unreachable. The live Flow view
+            still works; see <code>docs/db_setup.md</code>.</td></tr>
+      <tr><td><b>Save rejected</b></td>
+        <td>The config failed validation. Nothing was written; the message names the field.</td></tr>
+      <tr><td><b>“reconnecting…” in the header</b></td>
+        <td>The page can't reach the server. It retries every 1.5 s.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="security"><span class="num">13</span>Security</h2>
+  <p>
+    The console is <b>not</b> behind the MCP bearer token — it is a local operator tool. Bind the
+    server to localhost or a trusted network, or front it with your own auth. Two routes are not
+    read-only:
+  </p>
+  <ul>
+    <li><code>POST /gui/api/config</code> — validates before writing, and records an audit row
+      (who, when, what).</li>
+    <li><code>POST /gui/api/probe</code> — performs a server-side <code>GET</code> on the URL you
+      type (http/https only), so the editor can confirm an analyzer's contract.</li>
+  </ul>
+</main>
+</div>
+
+<footer>VISTA-MCP · <a href="./api-integration-guide">API Integration Guide</a> · <a href="./">Console</a></footer>
+
+<script>
+(function(){
+  const saved = localStorage.getItem("vista-theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", saved || (prefersDark ? "dark" : "light"));
+  const b = document.getElementById("themeBtn");
+  const sync = () => b.textContent = document.documentElement.getAttribute("data-theme")==="dark" ? "☀️" : "🌙";
+  sync();
+  b.onclick = () => {
+    const next = document.documentElement.getAttribute("data-theme")==="dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("vista-theme", next); sync();
+  };
+})();
+</script>
+</body>
+</html>

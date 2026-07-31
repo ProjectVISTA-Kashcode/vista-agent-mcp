@@ -1,13 +1,16 @@
 # VISTA-MCP — Architecture
 
 > **One sentence:** VISTA-MCP is an MCP server whose tools are thin entry points into a
-> **config-driven orchestrator** that discovers a set of standard "analyzers," lets **DeepSeek**
-> pick which optional ones to run for the user's question, calls them **in parallel**,
-> concatenates their reports, appends **ORB** troubleshooting, and returns one answer — with
-> **no per-analyzer code**. Adding capability is a config edit, not a deploy.
+> **config-driven orchestrator** that discovers a set of standard "analyzers" on every call, lets
+> an **AI Controller** decide *which* optional ones to run **and how to call each one from the
+> contract it just discovered*, runs them **in parallel**, concatenates their reports, appends
+> **ORB** troubleshooting, returns one answer — and records the whole thing in Postgres. There is
+> **no per-analyzer code**: adding capability is a config edit, not a deploy.
 
 - Standard analyzer contract → [`analyzer_api.md`](analyzer_api.md)
 - Add an analyzer / a whole tool → [`how_to_add_analyzer.md`](how_to_add_analyzer.md)
+- The operator console → [`gui_guide.md`](gui_guide.md)
+- Durable job history → [`db_setup.md`](db_setup.md)
 - Run & test locally → [`testing.md`](testing.md)
 
 ---
@@ -23,17 +26,17 @@ of view **nothing about the behavior changed** — it still passes a `source_url
                                    ┌──────────────────────── VISTA-MCP server (one process) ─────────────────────────┐
    MCP client                      │                                                                                  │
   (partner agent)                  │   server.py                         orchestrator/pipeline.py                     │
-      │  list_tools                │  ┌───────────┐  fetch log   ┌──────────────────────────────────────────────┐    │
-      │  call Tool(source_url,q)   │  │  @mcp.tool │────────────► │  VFR ─► TOOL_ENABLEMENT ─► DISCOVER ─► DECIDE │    │
-      ├───────────────────────────┼─►│  function  │              │        (config)          (/discover) (DeepSeek)│   │
-      │                            │  └───────────┘              │                                   │            │    │
-      │                            │       ▲                     │        ┌──────── selected, in parallel ───────┐│    │
-      │      one text report       │       │  report string      │        ▼            ▼             ▼            ││    │
-      │◄──────────────────────────┼───────┴─────────────────────┤  analyzer A   analyzer B   … (async gather)   ││    │
-      │                            │                             │        └──────────────┬──────────────────────┘│    │
-      │                            │                             │            CONCATENATE │  then  ORB (if on)    │    │
-      │                            │                             └────────────────────────┴───────────────────────┘   │
-      │                            │   every step → jobs registry → CLI logs + /gui (n8n-style live flow)              │
+      │  list_tools                │  ┌───────────┐  fetch log   ┌───────────────────────────────────────────────┐   │
+      │  call Tool(source_url,q)   │  │  @mcp.tool │────────────► │ VFR ─► TOOL_ENABLEMENT ─► DISCOVER ─► AI CTRL │   │
+      ├───────────────────────────┼─►│  function  │              │       (config)          (/discover)  (always) │   │
+      │                            │  └───────────┘              │                                   │           │   │
+      │                            │       ▲                     │       ┌──── selected, in parallel ─┴────────┐ │   │
+      │      one text report       │       │  report string      │       ▼            ▼             ▼          │ │   │
+      │◄──────────────────────────┼───────┴─────────────────────┤ analyzer A   analyzer B   … (async gather)  │ │   │
+      │                            │                             │       └──────────────┬─────────────────────┘ │   │
+      │                            │                             │           CONCATENATE │  then  ORB (if on)    │   │
+      │                            │                             └───────────────────────┴───────────────────────┘   │
+      │                            │   every step → jobs registry → CLI logs + /gui (live flow) + Postgres (forever)  │
       │                            └──────────────────────────────────────────────────────────────────────────────────┘
                                                     │  discover + call (standard HTTP)      │ ask
                                      ┌──────────────┼───────────────┐              ┌────────▼─────────┐
@@ -42,33 +45,41 @@ of view **nothing about the behavior changed** — it still passes a `source_url
                               (mandatory)       (optional)      (optional)         └───────────────────┘
 ```
 
-The flow matches the architecture diagram exactly:
-**`tool → VFR → TOOL_ENABLEMENT → DISCOVER TOOLS → DEEPSEEK QUERY → call analyzers (async) →
+The flow is:
+**`tool → VFR → TOOL_ENABLEMENT → DISCOVER TOOLS → AI CONTROLLER → call analyzers (async) →
 concatenate → ORB (if enabled) → answer back`.**
 
 ---
 
-## 2. Two ideas make it modular
+## 2. Three ideas make it modular
 
 ### 2a. Every analyzer speaks ONE standard contract
 See [`analyzer_api.md`](analyzer_api.md). Every analyzer exposes:
 
-- `GET  <base>/discover` → **AnalyzerDiscovery** (what it is + how to call it, incl. `when_to_use`)
-- `POST <query.path>` (multipart: file + optional question) → **AnalyzerResult** (`report_markdown`)
+- `GET  <base>/discover` → **AnalyzerDiscovery** (what it is + **how to call it**, incl. `when_to_use`)
+- `POST <query.path>` (multipart: file + declared params) → **AnalyzerResult** (`report_markdown`)
 
-Because the shapes are fixed, the orchestrator has exactly **one** discover function
+Because the *shapes* are fixed, the orchestrator has exactly **one** discover function
 (`discovery.py`), **one** call function (`analyzer_client.py`), and **one** read path
 (`report_markdown`). LogV implements this contract in its own repo
 (`backend/src/logviz/api/discover.py` + `…/v1/mcp_run.py`); the fakes implement it in
-`fakes/fake_analyzer.py`. **The orchestrator shares zero code with any analyzer.**
+`fakes/fake_analyzer.py` and `fakes/fake_analyzer_v2.py`. **The orchestrator shares zero code with
+any analyzer.**
 
-### 2b. Everything else is in ONE config per tool
+### 2b. The *contents* of that contract are read live, every call
+The shapes are fixed; the **details are not**. An analyzer may rename a param, add a required one,
+or move its endpoint — and a brand-new analyzer may be added to a tool minutes earlier. So the
+orchestrator hardcodes nothing about a request: on every job it fetches each analyzer's
+`/discover`, and the **AI Controller** builds a per-analyzer **call plan** from that document
+(§4). The plan is then validated against the same document before it is sent.
+
+### 2c. Everything else is in ONE config per tool
 `config/tool_enablement.json` — the **TOOL_ENABLEMENT** config. One entry per MCP tool:
 
 ```jsonc
 "Log_Analyzer_Visualizer": {
   "description": "…client-facing text shown in list_tools…",
-  "routing_system_prompt": "…this tool's DeepSeek analyzer-selection prompt…",
+  "routing_system_prompt": "…this tool's AI Controller analyzer-selection prompt…",
   "orb_enabled": true,
   "analyzers": [
     { "id": "logv", "api_url": "…/agent_assist", "mandatory": true,  "enabled": true, "timeout": 300 },
@@ -80,11 +91,11 @@ Because the shapes are fixed, the orchestrator has exactly **one** discover func
 
 - **`description`** — the MCP tool description clients read (config-driven so it's editable per
   tool; `server.py` falls back to a built-in default if empty).
-- **`routing_system_prompt`** — **per-tool** DeepSeek system prompt for the routing decision.
+- **`routing_system_prompt`** — **per-tool** AI Controller system prompt for the routing decision.
   Each MCP tool routes with its own tailored guidance (a config-editable "section"); a fixed
-  output contract is always appended so parsing never breaks. See §3, step 4.
-- **`orb_enabled`** — static decision (not DeepSeek): run ORB once at the end if true.
-- **`analyzers[]`** — `mandatory` ones are always called; the rest are DeepSeek-selected.
+  output contract is always appended so parsing never breaks. See §5.
+- **`orb_enabled`** — static decision (not the AI Controller): run ORB once at the end if true.
+- **`analyzers[]`** — `mandatory` ones are always called; the rest are AI-Controller-selected.
   `discover_url` empty ⇒ derived as `api_url + "/discover"`.
 
 **To add an analyzer to a tool, or add a whole new tool, you edit this file (or the GUI) — no
@@ -95,101 +106,163 @@ orchestrator code changes.**
 ## 3. The pipeline, step by step
 
 `orchestrator/pipeline.py::run(tool_name, file_bytes, filename, question, job_id)` → `str`.
-Every step emits a job event (CLI log + GUI). The whole function is wrapped so a bug never
-escapes as a raw MCP error; it always returns a string.
+Every step emits a job event (CLI log + GUI + database). The whole function is wrapped so a bug
+never escapes as a raw MCP error; it always returns a string.
 
-1. **VFR** (`vfr.py`) — *vetting & flow routing*. **Passthrough today**: takes the file, returns the
-   same file, reports `"Correct analyzer match"`. It is the seam where real routing logic goes
-   later (see §7). Kept as its own step so the flow/telemetry already has the node.
+1. **INTAKE** — the tool call as received plus the fetched file, so every execution shows what was
+   called and which file came in.
 
-2. **TOOL_ENABLEMENT** (`tool_enablement.py`) — load this tool's `ToolConfig` (cached; the GUI
-   can hot-reload it). Split analyzers into `mandatory()` and `optional()`. If the tool has no
+2. **VFR** (`vfr.py`) — *vetting & flow routing*. **Passthrough today**: takes the file, returns
+   the same file, reports `"Correct analyzer match"`. It is the seam where real routing logic goes
+   later (see §10). Kept as its own step so the flow/telemetry already has the node.
+
+3. **TOOL_ENABLEMENT** (`tool_enablement.py`) — load this tool's `ToolConfig` (cached; the GUI can
+   hot-reload it). Split analyzers into `mandatory()` and `optional()`. If the tool has no
    config/analyzers, return a friendly message.
 
-3. **DISCOVER TOOLS** (`discovery.py`) — `GET <base>/discover` for **every** configured analyzer,
-   **concurrently**, fail-soft. An analyzer that doesn't answer is dropped (logged) and simply
-   not used this run. Tolerates an `ApiResponse` envelope (`data:{…}`).
+4. **DISCOVER TOOLS** (`discovery.py`) — `GET <base>/discover` for **every** configured analyzer,
+   **concurrently**, fail-soft. An analyzer that doesn't answer is dropped (logged) and simply not
+   used this run. Tolerates an `ApiResponse` envelope (`data:{…}`). This is the only source of
+   truth for what each analyzer currently is and how it is called.
 
-4. **DEEPSEEK DECISION** (`decide.py`) — choose which **optional** analyzers to run.
-   - **Skip DeepSeek entirely** when there are **0 optional** analyzers that discovered OK — the
-     answer is fully determined (mandatory only). ORB is orthogonal and never affects this.
-     Examples: *1 mandatory + ORB on* → skip. *2 mandatory + ORB off* → skip.
-     *1 mandatory + 2 optional* → **DeepSeek runs**.
-   - Otherwise, build the prompt: the **per-tool `routing_system_prompt`** (or a generic default)
-     **+ a fixed JSON output contract**, then each optional analyzer's `when_to_use`, then the
-     question. DeepSeek returns `{"call":[ids], "reason":"…"}`.
-   - **Fail-safe:** DeepSeek unreachable or unparseable ⇒ include **all** optional analyzers
-     (better to over-analyze than to silently drop a relevant one) and say so in the reason.
-   - Mandatory are always kept; result is `Decision(selected_ids, used_deepseek, reason,
-     system_prompt, deepseek_raw)`.
+5. **AI CONTROLLER** (`decide.py` + `ai_controller.py` + `plan.py`) — **always runs** (§4). It
+   returns a `Decision`: the selected analyzer ids, the reason, and a validated **`CallPlan` per
+   analyzer that will run**.
 
-5. **CALL analyzers** — the selected analyzers run **concurrently** via `asyncio.gather`, each
-   through the single generic `analyzer_client.call(ref, discovery, file, filename, question)`
-   which builds the multipart request from the discovery's `params`, POSTs, and validates the
-   response to `AnalyzerResult`. It **never raises** — on failure it returns `ok=False` with an
-   error result, so one slow/broken analyzer can't sink the others.
+6. **CALL analyzers** — the selected analyzers run **concurrently** via `asyncio.gather`, each
+   through the single generic `analyzer_client.call(ref, discovery, file, filename, question,
+   plan)` which **executes the validated plan** and parses the response into `AnalyzerResult`. It
+   **never raises** — on failure it returns `ok=False` with an error result, so one slow/broken
+   analyzer can't sink the others.
 
-6. **CONCATENATE** — join every non-empty `report_markdown` with a horizontal rule
+7. **CONCATENATE** — join every non-empty `report_markdown` with a horizontal rule
    (`\n\n---\n\n`). The orchestrator never re-formats an analyzer's text.
 
-7. **ORB** (`orb.py`) — if `orb_enabled`, ask the ORB troubleshooting API **once** with the
+8. **ORB** (`orb.py`) — if `orb_enabled`, ask the ORB troubleshooting API **once** with the
    combined report + the user's question, and append the answer as `## ORB Suggestions`.
    **Fail-open:** if ORB errors or is empty, the report is returned without it.
 
-8. **DONE** — return the combined markdown. `jobs.finish()` records totals.
+9. **DONE** — return the combined markdown. `jobs.finish()` records totals, and the whole job
+   (steps, per-analyzer detail, final report) is persisted.
 
 ---
 
-## 4. Per-tool DeepSeek routing prompt (why it exists)
+## 4. The AI Controller
 
-Different MCP tools route differently. A log tool weighs "does this question need the performance
-or EoS companion?"; a future config-generation tool would weigh entirely different companions.
-So the **routing system prompt is per tool**, stored in TOOL_ENABLEMENT next to the analyzers,
-and editable in the GUI. `decide.py` composes:
+Formerly "the DeepSeek decision". Renamed because it now does more than pick analyzers, and
+because the gateway behind it is an implementation detail. It is still **only** a control-plane
+call — the analysis itself always belongs to the analyzers.
+
+### 4a. It has two jobs
+
+1. **Selection** — which *optional* analyzers add value for this question (mandatory ones are
+   always in the set), judged from each analyzer's `when_to_use` in its live discovery.
+2. **Invocation planning** — for **every** analyzer that will run, how to call it: method, URL,
+   content type, which param carries the file, which declared params get the question, and what
+   value any other required param should take. All read from the contract just discovered.
+
+### 4b. Why it never skips
+
+The old rule was "0 optional analyzers ⇒ the answer is determined ⇒ skip the model". That was true
+only while a request shape could be assumed. It can't: discovery is live, an analyzer can change
+its API between two calls, and a new analyzer can appear in the config at any moment. Skipping
+would mean calling a possibly-changed API with a request shape someone assumed the last time they
+read the docs.
+
+So the controller runs on **every** job. With nothing to select it runs in **`plan-only`** mode and
+still reads the fresh contracts. Discovery decides *what is possible*; the controller decides
+*what to do about it*. The GUI shows the mode on the node.
+
+### 4c. The prompt
 
 ```
    <tool's routing_system_prompt   (or the generic default if unset)>
    +
-   <fixed OUTPUT CONTRACT: 'return only {"call":[…],"reason":"…"}'>   ← machinery, never edited
+   <fixed OUTPUT CONTRACT: 'return only {"call":[…],"reason":…,"invocations":[…]}'>  ← machinery
+   +
+   <the input file name/size, the user's question>
+   +
+   <every analyzer's LIVE contract: when_to_use, method, URL, content type,
+    and each declared param: name, required, type, location, default, description>
 ```
 
-This lets a tool author rewrite the *guidance* freely — to justify and match that tool's
-description — without ever breaking the decision parsing. The exact system prompt used is stored
-on the `Decision` and surfaced on the `decide` node in the GUI.
+A tool author can rewrite the *guidance* freely — to justify and match that tool's description —
+without ever breaking the decision parsing. The exact system prompt used is stored on the
+`Decision`, surfaced on the AI Controller node in the GUI, and written to the database.
+
+Field values use placeholders (`{{question}}`, `{{filename}}`) rather than echoing content, so a
+long question can never be truncated, reworded or re-quoted on its way to an analyzer.
+
+### 4d. Validation — the model never gets the last word
+
+`plan.py::from_ai` checks every field of the proposed plan against the same discovery document:
+
+| Field | Rule |
+|---|---|
+| `method` | must equal the discovered method, else corrected |
+| `url` | must equal the discovered `query.path`, else corrected (a different host is rejected outright) |
+| `content_type` | must equal the discovered content type, else corrected |
+| `file_param` | must be a declared `location:"file"` param, else the first declared one |
+| `fields` | only declared params survive; unknown keys are dropped |
+| required params | anything missing is filled from the discovery (its `default`, else the question/filename heuristics) |
+
+Every correction is recorded in `CallPlan.notes`, shown on the node in the GUI, and stored per
+analyzer per job — so "what did the model propose vs. what did we send" is always answerable.
+The plan's `source` ends up `ai`, `ai-corrected` or `deterministic`.
+
+### 4e. Fail-safe
+
+If the AI gateway is disabled (`AI_CONTROLLER_ENABLED=0`), unreachable, or returns junk, the
+decision falls back to the **deterministic policy**: include every optional analyzer (better to
+over-analyze than to silently drop a relevant one) and build each request straight from its
+discovery document (`plan.py::deterministic`). For the standard `file` + `question` contract that
+produces byte-for-byte the request VISTA-MCP has always sent, so a gateway outage is invisible to
+clients — it costs breadth of judgement, never correctness.
 
 ---
 
-## 5. Concurrency model
+## 5. Per-tool routing prompt (why it exists)
+
+Different MCP tools route differently. A log tool weighs "does this question need the performance
+or EoS companion?"; a future config-generation tool would weigh entirely different companions. So
+the **routing system prompt is per tool**, stored in TOOL_ENABLEMENT next to the analyzers, and
+editable in the GUI. `decide.py` composes it with the fixed output contract (§4c).
+
+---
+
+## 6. Concurrency model
 
 - **Across tool calls:** every call gets its own `job_id`, its own async context, and its own
-  entry in the job registry. The server (uvicorn/Starlette under FastMCP) handles many clients
-  and files at once. Verified with 3 simultaneous clients routing three different ways.
+  entry in the job registry. The server (uvicorn/Starlette under FastMCP) handles many clients and
+  files at once. Verified with 3 simultaneous clients routing three different ways.
 - **Within a call:** discovery is concurrent; the selected analyzers are concurrent
-  (`asyncio.gather`); ORB is a single call at the end. Wall-clock ≈ slowest analyzer + ORB, not
-  the sum.
-- The job registry uses a lock and is bounded (30 most-recent jobs; older evicted — durable history/metrics belong in a DB + Grafana later).
+  (`asyncio.gather`); ORB is a single call at the end. Wall-clock ≈ AI Controller + slowest
+  analyzer + ORB, not the sum.
+- **Database writes** never touch the request path: they are queued and drained by one background
+  thread (§8).
 
 ---
 
-## 6. Observability — CLI logs, jobs, and the GUI
+## 7. Observability — CLI logs, the console, and history
 
-- **`orchestrator/jobs.py`** is the single source of truth. `emit()` does two things at once:
-  writes a structured line to the terminal (via `vlog`, extensive per-step logging with icons,
-  timings, and details) **and** appends a `JobEvent` to the in-memory `Job`.
-- **`orchestrator/gui.py`** attaches an operator console to the same process via FastMCP custom
+- **`orchestrator/jobs.py`** is the single source of truth. `emit()` does three things at once:
+  writes a structured line to the terminal (via `vlog`, with icons, timings and details), appends
+  a `JobEvent` to the in-memory `Job`, and queues the event for Postgres.
+- **`orchestrator/gui.py`** attaches the operator console to the same process via FastMCP custom
   routes (so it reads the **live** in-memory registry — no polling a file). Mounted under **both
   `/gui` and `/mcp/gui`** (the latter so it's reachable behind the prod proxy that forwards only
-  `/mcp/*`); the page derives its API base from its own URL, so it works at either prefix:
-  - `GET /gui` (and `/mcp/gui`) — the single-page app (`gui/index.html`)
-  - `GET …/gui/api/state` — tools (from config) + recent job summaries (last 30, polled ~1.5s)
-  - `GET …/gui/api/jobs/{id}` — one job's derived **flow** (ordered nodes + live status/timings)
-  - `GET|POST …/gui/api/config` — read / **save** TOOL_ENABLEMENT (validated + hot-reloaded)
-- The GUI is **n8n-style**: nodes `INTAKE (tool call + fetched file) → VFR → TOOL_ENABLEMENT →
-  DISCOVER → DEEPSEEK → [analyzers in parallel] → CONCAT → ORB → DONE`, colored by status, edges
-  animated while running. The flow is **derived per tool/job**. Tabs toggle between tools; the
-  sidebar lists the last-30 live jobs; **Integrations** opens a dashboard of every tool + its
-  analyzers; the config editor **adds/removes whole tools**, analyzers, ORB, descriptions, and
-  each tool's routing prompt; a **dark-mode toggle** persists per browser. (Red/white theme.)
+  `/mcp/*`); the page derives its API base from its own URL:
+  - `GET /gui` — the single-page console (`gui/index.html`)
+  - `GET …/gui/api/state` — tools (from config) + **live** job summaries + DB/server status
+  - `GET …/gui/api/jobs` — **durable** history from Postgres, filtered + paginated
+  - `GET …/gui/api/jobs/{id}` — one job's flow: live from memory, else rebuilt from Postgres
+  - `GET …/gui/api/analytics` — dashboard aggregates
+  - `GET …/gui/api/facets` — distinct tools/analyzers seen (history filters)
+  - `GET|POST …/gui/api/config` — read / **save** TOOL_ENABLEMENT (validated, hot-reloaded, audited)
+  - `POST …/gui/api/probe` — fetch an analyzer's `/discover` so the editor can validate + auto-fill
+- The console has three views — **Flow** (live canvas with pan/zoom and a per-node inspector),
+  **Dashboard** (analytics over the stored history), **History** (search the permanent record and
+  replay any job). Full walkthrough: [`gui_guide.md`](gui_guide.md).
 - **Dynamic tools:** `server.py` registers one generic MCP tool per config entry and reconciles
   the live tool set via `sync_tools()` at startup and on every save (through
   `tool_enablement.on_change`). So **adding a tool in the GUI exposes a real MCP tool — name +
@@ -198,11 +271,32 @@ on the `Decision` and surfaced on the `decide` node in the GUI.
 
 > **Security note:** the `/gui` routes are **not** behind the MCP bearer token — it's a local
 > operator console. Bind to localhost/a trusted network, or front it with your own auth. The
-> config POST is the only mutating route and it validates before writing.
+> config POST validates before writing (and records an audit row); the probe POST performs a
+> server-side GET on the URL you type (http/https only).
 
 ---
 
-## 7. Security posture (unchanged from before the rearchitecture)
+## 8. Durable job history
+
+`orchestrator/db.py` writes every job to PostgreSQL — see [`db_setup.md`](db_setup.md) for the
+schema, the production `psql` commands and the environment variables.
+
+| Table | One row per |
+|---|---|
+| `mcp_jobs` | tool call — status, timings, routing, AI prompt/answer/plan source, ORB, final report |
+| `mcp_job_events` | pipeline step event, in order |
+| `mcp_job_analyzers` | analyzer per job — its live discovery, the exact request sent, the result |
+| `mcp_config_audit` | TOOL_ENABLEMENT save from the GUI |
+
+Design rules: **never block the pipeline** (writes go on an in-process queue drained by one
+background thread), **never break a request** (every failure is caught and logged; with no
+database the server behaves exactly as it did before), and **one writer, in order** (a job row
+always lands before its events). The in-memory registry remains as the *live* window
+(`MCP_JOBS_MEMORY`, default 60); Postgres is the permanent record.
+
+---
+
+## 9. Security posture (unchanged by the rearchitecture)
 
 - **Auth:** MCP protocol endpoint requires a static bearer token (`StaticTokenVerifier`). The
   server refuses to start with an empty/default token unless `MCP_ALLOW_INSECURE=1`.
@@ -211,48 +305,58 @@ on the `Decision` and surfaced on the `decide` node in the GUI.
 - **Streaming + capped fetch:** logs are streamed and size-capped (`MAX_LOG_BYTES`); signed query
   strings are never logged.
 - **TLS:** verified by default; opt-in relaxation is host-scoped (`tlsconf.py`).
+- **The AI Controller cannot widen the blast radius:** it can only propose a request, and a
+  proposal that isn't in the analyzer's own discovery document is corrected or dropped before
+  anything is sent (§4d).
 
 ---
 
-## 8. File map
+## 10. File map
 
 ```
 server.py                     MCP server: auth, log fetch (SSRF/TLS), one thin tool fn → pipeline; mounts GUI
 config/tool_enablement.json   TOOL_ENABLEMENT — per-tool: description, routing_system_prompt, orb, analyzers[]
 orchestrator/
-  models.py                   AnalyzerDiscovery/AnalyzerResult (contract) + ToolConfig/AnalyzerRef/Decision/Job
+  models.py                   AnalyzerDiscovery/AnalyzerResult (contract) + ToolConfig/AnalyzerRef/
+                              CallPlan/Decision/AnalyzerRun/Job
   tool_enablement.py          load/get/reload/save the config (cached, safe default)
   vfr.py                      VFR — passthrough today (real routing seam; see below)
-  discovery.py                GET /discover for all analyzers, concurrent, fail-soft
-  deepseek.py                 AI-MCP gateway call (ds4 → ai-mcp fallback) + JSON extraction
-  decide.py                   the routing decision + skip-logic + per-tool prompt composition
-  analyzer_client.py          the ONE generic multipart call → AnalyzerResult (never raises)
+  discovery.py                GET /discover for all analyzers, concurrent, fail-soft (+ probe())
+  ai_controller.py            the AI gateway client (ask + JSON extraction), fail-safe
+  decide.py                   the AI Controller decision: selection + per-analyzer invocation plans
+  plan.py                     build a CallPlan from discovery · validate an AI plan against it
+  analyzer_client.py          the ONE generic call — executes a validated plan (never raises)
   orb.py                      ORB ask (fail-open) → "## ORB Suggestions"
   pipeline.py                 the whole flow, wired together, always returns a string
-  jobs.py                     job/flow registry → CLI logs + GUI
-  gui.py                      /gui routes (state, per-job flow, config editor)
-gui/index.html                the single-page n8n-style flow GUI (red/white)
-fakes/fake_analyzer.py        a real analyzer following the contract, for local testing
-docs/                         analyzer_api.md · Architecture.md · how_to_add_analyzer.md · testing.md
+  jobs.py                     job/flow registry → CLI logs + GUI + database
+  db.py                       durable history in Postgres (queued, one writer, fail-open)
+  gui.py                      /gui routes (state, history, job flow, analytics, config, probe)
+gui/index.html                the operator console (Flow · Dashboard · History)
+fakes/fake_analyzer.py        a reference analyzer following the contract
+fakes/fake_analyzer_v2.py     the same contract with a DIFFERENT request shape (dynamic-discovery test)
+docs/                         analyzer_api.md · Architecture.md · how_to_add_analyzer.md ·
+                              gui_guide.md · db_setup.md (+ .sql) · testing.md
 ```
 
 ---
 
-## 9. Next improvements
+## 11. Next improvements
 
 - **Real VFR logic (highest priority).** `vfr.py` is a passthrough today (returns the file and
-  `"Correct analyzer match"`). The seam is already in the flow, the GUI, and the telemetry, so
-  the real implementation is a drop-in. Intended responsibilities for the real VFR:
+  `"Correct analyzer match"`). The seam is already in the flow, the GUI, the telemetry and the
+  database, so the real implementation is a drop-in. Intended responsibilities:
   - **Pre-flight file inspection / normalization** — sniff format, decompress, size/shape checks,
     redact obvious secrets before anything leaves the process.
-  - **Analyzer-match gating** — confirm the file actually suits this tool's analyzers and return
-    a real match verdict (today it always says "Correct analyzer match"). A negative verdict
-    could short-circuit with a helpful message instead of calling analyzers.
-  - **Routing hints** — emit structured hints (detected log/event type, product, version) that
-    `decide.py` can feed to DeepSeek to sharpen optional-analyzer selection.
+  - **Analyzer-match gating** — confirm the file actually suits this tool's analyzers and return a
+    real match verdict (today it always says "Correct analyzer match"). A negative verdict could
+    short-circuit with a helpful message instead of calling analyzers.
+  - **Routing hints** — emit structured hints (detected log/event type, product, version) that the
+    AI Controller can use to sharpen selection.
   - Keep it fail-safe and cheap; it runs on every call before any analyzer.
-- **Discovery cache** with TTL so `/discover` isn't hit on every call.
-- **Auth on the GUI** (token or SSO) for non-local deployments; audit log for config edits.
-- **Per-analyzer streaming/partial results** to the GUI as they complete.
-- **DeepSeek decision cache** keyed by (tool, optional-set, normalized question).
+- **Discovery cache** with a short TTL so `/discover` isn't hit on every call — must stay short
+  enough that a contract change is picked up promptly.
+- **AI Controller decision cache** keyed by (tool, *discovery fingerprint*, normalized question).
+  Fingerprinting the discovery keeps it correct: any contract change busts the cache.
+- **Auth on the GUI** (token or SSO) for non-local deployments.
+- **Per-analyzer streaming/partial results** to the console as they complete.
 - **Config schema validation** surfaced inline in the GUI editor (field-level errors).

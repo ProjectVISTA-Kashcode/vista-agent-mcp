@@ -1,7 +1,7 @@
 """ORB — the built-in troubleshooting service (NOT an analyzer).
 
-ORB is a static, config-driven step (``orb_enabled`` in TOOL_ENABLEMENT), never chosen by
-DeepSeek. It runs **once at the end**: the concatenated analyzer report + a fixed troubleshoot
+ORB is a static, config-driven step (``orb_enabled`` in TOOL_ENABLEMENT), never chosen by the
+AI Controller. It runs **once at the end**: the concatenated analyzer report + a fixed troubleshoot
 instruction + the user's original question are sent to the ORB "ask" API, and ORB's answer is
 appended to the final report as a ``## ORB Suggestions`` section.
 

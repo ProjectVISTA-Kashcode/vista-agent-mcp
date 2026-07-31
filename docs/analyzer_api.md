@@ -7,6 +7,11 @@
 >
 > This document is the source of truth for that contract. If your analyzer follows it, VISTA-MCP
 > can use it with zero code changes (see `how_to_add_analyzer.md`).
+>
+> **Your discovery document is read on every call.** The orchestrator does not remember what your
+> API looked like yesterday: it fetches `/discover`, and the **AI Controller** builds that call's
+> request from what it finds there (then validates the result against the same document). So you
+> can rename a param, add a required one, or move your endpoint — callers follow. See §7.
 
 ---
 
@@ -28,7 +33,7 @@ internal network (add mTLS/token later if needed — it does not change these sh
 
 ## 2. `GET <base>/discover` → `AnalyzerDiscovery`
 
-Tells the orchestrator **what** the analyzer is (so DeepSeek can decide whether to use it) and
+Tells the orchestrator **what** the analyzer is (so the AI Controller can decide whether to use it) and
 **how** to call it.
 
 ```jsonc
@@ -40,7 +45,7 @@ Tells the orchestrator **what** the analyzer is (so DeepSeek can decide whether 
     "id": "perf",                                  // stable short id (also the config id)
     "title": "Performance Analyzer",
     "summary": "One-line description.",
-    "when_to_use": "The text DeepSeek reads to decide. Be specific: say exactly which questions this analyzer answers and which it does NOT.",
+    "when_to_use": "The text the AI Controller reads to decide. Be specific: say exactly which questions this analyzer answers and which it does NOT.",
     "input_types": ["FortiOS/FortiGate log or config file"],
     "supported_log_types": []                      // optional; [] = not log-type specific
   },
@@ -50,7 +55,10 @@ Tells the orchestrator **what** the analyzer is (so DeepSeek can decide whether 
     "content_type": "multipart/form-data",
     "params": [
       { "name": "file",     "required": true,  "type": "file",   "location": "file" },
-      { "name": "question", "required": false, "type": "string", "location": "form" }
+      { "name": "question", "required": false, "type": "string", "location": "form" },
+      { "name": "mode",     "required": true,  "type": "string", "location": "form",
+        "default": "quick",
+        "description": "Analysis depth: 'quick' or 'deep'. Choose 'deep' when the question names a specific device or metric." }
     ],
     "response": "AnalyzerResult"
   }
@@ -58,10 +66,17 @@ Tells the orchestrator **what** the analyzer is (so DeepSeek can decide whether 
 ```
 
 **Field notes**
-- `analyzer.when_to_use` is the single most important field — it is *the* input to the DeepSeek
-  tool-selection decision. Write it like a routing rule: what to call it for, and what not to.
-- `query.path` must be a fully-qualified URL. `query.params` declares the multipart body; the
-  orchestrator builds the request from it, so name your file field and question field here.
+- `analyzer.when_to_use` is the single most important field — it is *the* input to the AI
+  Controller's selection decision. Write it like a routing rule: what to call it for, and what
+  not to.
+- `query.path` must be a fully-qualified URL. `query.params` declares the request body; the
+  orchestrator builds every request from it, so declare **every** param you accept — a param you
+  don't declare will never be sent.
+- `param.description` is read by the AI Controller when it has to choose a value. Describe the
+  allowed values and when each applies (see `mode` above) and it will pick sensibly.
+- `param.default` (optional, additive) is the value to send when nobody has a better one. **If you
+  add a REQUIRED param, give it a `default`** — that keeps the no-AI fallback path working;
+  without one, a caller that can't reach the AI gateway has nothing correct to send.
 - Extra fields are allowed (forward-compatible) — the orchestrator ignores what it doesn't know.
 - An `ApiResponse` envelope (`{ok, kind, data:{…}}`) is tolerated: if the top level has no
   `analyzer` key but has a dict `data`, the orchestrator reads `data`.
@@ -113,7 +128,8 @@ class AnalyzerParam(BaseModel):
     name: str; required: bool = False
     type: str = "string"        # "string" | "file"
     location: str = "form"      # "form" | "file"
-    description: str = ""
+    description: str = ""       # the AI Controller reads this when choosing a value
+    default: str = ""           # value to send when nobody has a better one
 
 class AnalyzerQuery(BaseModel):
     method: str = "POST"
@@ -147,15 +163,20 @@ follows this contract in ~60 lines).
 ## 5. How the orchestrator uses it
 
 ```
-DISCOVER   GET <base>/discover                → AnalyzerDiscovery         (once per run, concurrent)
-DECIDE     DeepSeek reads analyzer.when_to_use → include this analyzer?    (skipped if not optional)
-CALL       POST <query.path>  (file+question)  → AnalyzerResult            (concurrent with others)
+DISCOVER   GET <base>/discover                     → AnalyzerDiscovery   (every run, concurrent)
+DECIDE     AI Controller reads analyzer.when_to_use → include this analyzer?
+PLAN       AI Controller reads query.{method,path,content_type,params}
+                                                   → a CallPlan for each analyzer that will run
+VALIDATE   the plan is checked field-by-field against that same discovery document
+CALL       execute the plan                        → AnalyzerResult      (concurrent with others)
 CONCAT     join every report_markdown with a horizontal rule
 ORB        (once, if the tool has orb_enabled) appended as "## ORB Suggestions"
 ```
 
-- **Mandatory** analyzers are always called; **optional** ones are chosen by DeepSeek from
-  `when_to_use`. Both are set per tool in `config/tool_enablement.json`.
+- **Mandatory** analyzers are always called; **optional** ones are chosen by the AI Controller
+  from `when_to_use`. Both are set per tool in `config/tool_enablement.json`.
+- The AI Controller runs on **every** call — including when a tool has no optional analyzers —
+  precisely so a contract change is noticed the moment it happens.
 - Because the shapes are fixed, one generic function
   (`orchestrator/analyzer_client.py::call`) calls **any** analyzer, and one function
   (`orchestrator/discovery.py`) discovers **any** analyzer.
@@ -171,3 +192,26 @@ ORB        (once, if the tool has orb_enabled) appended as "## ORB Suggestions"
   - discovery: `GET /logVisualizer/api/agent_assist/discover`
   - query:     `POST /logVisualizer/api/agent_assist/run`
   - source:    `backend/src/logviz/api/discover.py` and `…/v1/mcp_run.py`
+
+---
+
+## 7. Changing your API without breaking callers
+
+This is the point of reading discovery on every call. You may:
+
+| Change | What the caller does | What you should do |
+|---|---|---|
+| Rename the file param (`file` → `payload`) | attaches the file to the newly declared file param | just declare it |
+| Rename the question param (`question` → `query`) | sends the question to the new name | keep `description` clear |
+| Move the endpoint (`/run` → `/v2/analyze`) | calls the newly advertised `query.path` | keep the old path alive briefly if other clients exist |
+| Add an **optional** param | omitted unless the AI Controller sees a reason to set it | describe when it matters |
+| Add a **required** param | the AI Controller chooses a value from your `description`; the no-AI fallback sends your `default` | **always give it a `default`** |
+| Change `content_type` to `application/json` | sends a JSON body built from the declared params | note that a JSON body carries no file |
+
+What a caller will **not** do, by design: send a param you didn't declare, call a path you didn't
+advertise, or use a verb/host you didn't advertise. If the AI Controller proposes any of those,
+validation replaces it with the discovered value and records the correction.
+
+`fakes/fake_analyzer_v2.py` is a working example of *all* of the above at once — a renamed file
+param, a renamed + required question param, a new required `mode` param (with a `default`), and a
+different path — with no VISTA-MCP change. `docs/testing.md` §4 drives it end to end.

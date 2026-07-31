@@ -8,20 +8,20 @@
         {
           "id": "logv",
           "title": "Log Analyzer & Visualizer",
-          "api_url": "http://127.0.0.1:8802/logVisualizer/api/agent_assist",
+          "api_url": "https://vista.fortinet.com/logVisualizer/api/agent_assist",
+          "discover_url": "",
           "mandatory": true,
           "enabled": true,
-          "timeout": 300,
-          "discover_url": ""
+          "timeout": 300
         },
         {
           "id": "perf",
           "title": "Performance Analyzer",
           "api_url": "http://127.0.0.1:8811/perf",
+          "discover_url": "",
           "mandatory": false,
           "enabled": true,
-          "timeout": 120,
-          "discover_url": ""
+          "timeout": 120
         }
       ]
     },
@@ -34,19 +34,19 @@
           "id": "new_analyzer1",
           "title": "",
           "api_url": "http://127.0.0.1:PORT/base",
+          "discover_url": "",
           "mandatory": true,
           "enabled": true,
-          "timeout": 120,
-          "discover_url": ""
+          "timeout": 120
         },
         {
           "id": "new_analyzer2",
           "title": "",
           "api_url": "http://127.0.0.1:PORT/base",
+          "discover_url": "",
           "mandatory": false,
           "enabled": true,
-          "timeout": 120,
-          "discover_url": ""
+          "timeout": 120
         }
       ]
     }

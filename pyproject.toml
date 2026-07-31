@@ -7,4 +7,7 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2",
     "python-dotenv>=1.0",
+    # Durable job history + GUI dashboard/history. Optional at runtime: without it (or without
+    # DATABASE_URL) the server runs exactly as before, with the live in-memory view only.
+    "psycopg[binary,pool]>=3.1",
 ]

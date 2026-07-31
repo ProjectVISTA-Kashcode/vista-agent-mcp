@@ -11,7 +11,7 @@ Per-analyzer fields (see :class:`~orchestrator.models.AnalyzerRef`):
     id           short id, e.g. "logv"
     api_url      analyzer base URL (the discovery advertises the query path under it)
     discover_url empty → derived as ``api_url + "/discover"``
-    mandatory    true → ALWAYS called; false → DeepSeek decides from the user's question
+    mandatory    true → ALWAYS called; false → the AI Controller decides from the user's question
     enabled      false → ignored entirely
 """
 from __future__ import annotations
