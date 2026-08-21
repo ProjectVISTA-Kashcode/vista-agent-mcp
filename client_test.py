@@ -8,7 +8,9 @@ Simulates exactly what the partner agent does, minus their infra:
      so a REMOTE MCP server (e.g. https://vista.fortinet.com/mcp/) can fetch it — a
      loopback 127.0.0.1 URL is only reachable when the server runs on this same box.
   2. Connects to the VISTA-MCP server over MCP (HTTP transport) with the bearer token.
-  3. Calls `list_tools`, then `Log_Analyzer_Visualizer` with `{source_url, question}`.
+  3. Calls `list_tools` and prints each tool EXACTLY as an MCP client/LLM receives it
+     (full description, full input schema, output schema, annotations, token cost),
+     then flags tools the model cannot tell apart. Then calls the tool.
 
 Config resolution (highest precedence first):
     CLI flags  --url / --token / --host-ip
@@ -23,7 +25,8 @@ Run (server must be reachable):
     # redirect drops the Authorization header (→ 401). Local/LAN URLs work either way.
     python client_test.py --no-question                        # analyze + visualize only
     python client_test.py --host-ip 203.0.113.7                # advertise a public IP for the log
-    python client_test.py --list-only                          # just auth + list tools
+    python client_test.py --list-only                          # just auth + the tool catalog
+    python client_test.py --list-only --raw                    # + raw JSON per tool
 
 The token MUST match the server's MCP_AUTH_TOKEN. On a 401 the client prints the (masked)
 token it sent so you can compare. Single-quote tokens containing `$` in the shell.
@@ -34,9 +37,12 @@ import argparse
 import asyncio
 import functools
 import http.server
+import json
 import os
 import socket
+import textwrap
 import threading
+from collections import defaultdict
 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -102,6 +108,148 @@ def _result_text(res) -> str:
     return text or str(res)
 
 
+# ── Tool catalog rendering ────────────────────────────────────────────────────
+# What an MCP client (and the LLM behind it) actually receives per tool is: name,
+# description, and inputSchema — nothing else. Whether the model picks the RIGHT
+# tool is decided entirely by that text, so this prints it verbatim and
+# untruncated rather than a one-line preview.
+WIDTH = 78
+
+
+def _fmt_type(spec) -> str:
+    """Human-readable type for one JSON-Schema property."""
+    if not isinstance(spec, dict):
+        return "any"
+    if "enum" in spec:
+        return " | ".join(json.dumps(v) for v in spec["enum"])
+    if "anyOf" in spec:
+        return " | ".join(_fmt_type(s) for s in spec["anyOf"])
+    kind = spec.get("type", "any")
+    if kind == "array":
+        return f"array<{_fmt_type(spec.get('items') or {})}>"
+    return kind
+
+
+def _wrap(text: str, indent: str) -> str:
+    """Wrap to WIDTH, preserving the author's paragraph breaks."""
+    out: list[str] = []
+    for para in (text or "").split("\n"):
+        if not para.strip():
+            out.append("")
+            continue
+        out.extend(textwrap.wrap(para, width=max(20, WIDTH - len(indent))))
+    return "\n".join(indent + line for line in out)
+
+
+def _approx_tokens(text: str) -> int:
+    """Rough ~4-chars-per-token estimate — enough to compare tools, not exact."""
+    return max(1, len(text) // 4)
+
+
+def _schema_lines(schema: dict) -> list[str]:
+    props = (schema or {}).get("properties") or {}
+    required = set((schema or {}).get("required") or [])
+    if not props:
+        return ["     (no parameters)"]
+    lines: list[str] = []
+    for name, spec in props.items():
+        spec = spec if isinstance(spec, dict) else {}
+        flag = "REQUIRED" if name in required else "optional"
+        head = f"     • {name}  ({_fmt_type(spec)})  {flag}"
+        if "default" in spec:
+            head += f"  default={spec['default']!r}"
+        lines.append(head)
+        desc = (spec.get("description") or "").strip()
+        if desc:
+            # split so the caller can prefix EVERY physical line with the gutter
+            lines.extend(_wrap(desc, "         ").split("\n"))
+    return lines
+
+
+def print_tool_catalog(tools, raw: bool = False) -> None:
+    """Print every tool the way an MCP client sees it, then flag routing ambiguity."""
+    print("=" * WIDTH)
+    print(f"list_tools → {len(tools)} tool(s)")
+    print("Everything below is the ENTIRE basis a model has for choosing a tool.")
+    print("=" * WIDTH)
+
+    total = 0
+    for i, t in enumerate(tools, 1):
+        desc = t.description or ""
+        schema = t.inputSchema or {}
+        cost = _approx_tokens(t.name + desc + json.dumps(schema))
+        total += cost
+
+        print(f"\n┌─[{i}] {t.name}")
+        if getattr(t, "title", None):
+            print(f"│   title    : {t.title}")
+        ann = getattr(t, "annotations", None)
+        if ann is not None:
+            hints = ann.model_dump(exclude_none=True)
+            print(f"│   hints    : {hints or '(none)'}")
+        meta = getattr(t, "meta", None)
+        if meta:
+            print(f"│   meta     : {json.dumps(meta)[:160]}")
+        print(f"│   ~tokens  : {cost}   (context cost of exposing this tool)")
+        print("│")
+        print("│   DESCRIPTION — verbatim; this is the routing signal:")
+        if desc.strip():
+            print(_wrap(desc, "│     "))
+        else:
+            print("│     ⚠️  EMPTY — the model has only the tool NAME to go on.")
+        print("│")
+        print("│   INPUT SCHEMA:")
+        for line in _schema_lines(schema):
+            print("│" + line)
+        out_schema = getattr(t, "outputSchema", None)
+        if out_schema:
+            print("│")
+            print(f"│   OUTPUT SCHEMA: {json.dumps(out_schema)[:280]}")
+        print("└" + "─" * (WIDTH - 1))
+
+        if raw:
+            payload = t.model_dump(exclude_none=True, by_alias=True)
+            print(textwrap.indent(json.dumps(payload, indent=2, ensure_ascii=False), "    "))
+
+    print(f"\n≈{total} tokens of context consumed by this catalog.")
+    _report_ambiguity(tools)
+
+
+def _report_ambiguity(tools) -> None:
+    """Flag tools a model cannot tell apart.
+
+    Every VISTA tool is registered from the same factory, so they share one input
+    schema by construction — the per-tool description in TOOL_ENABLEMENT is the
+    only differentiator. If two descriptions match, routing between them is a
+    coin flip no prompt engineering downstream can fix.
+    """
+    empty = [t.name for t in tools if not (t.description or "").strip()]
+    by_desc: dict[str, list[str]] = defaultdict(list)
+    by_schema: dict[str, list[str]] = defaultdict(list)
+    for t in tools:
+        by_desc[" ".join((t.description or "").split()).lower()].append(t.name)
+        by_schema[json.dumps(t.inputSchema or {}, sort_keys=True)].append(t.name)
+
+    dup_desc = [n for n in by_desc.values() if len(n) > 1]
+    dup_schema = [n for n in by_schema.values() if len(n) > 1]
+    if not (empty or dup_desc or dup_schema):
+        return
+
+    print("\n" + "!" * WIDTH)
+    print("ROUTING AMBIGUITY — what a model cannot distinguish")
+    for names in empty:
+        print(f"  ✖ no description: {names}")
+    for names in dup_desc:
+        print(f"  ✖ IDENTICAL descriptions: {', '.join(names)}")
+        print("    Nothing distinguishes these; the model picks arbitrarily.")
+        print("    Fix: give each a distinct description in config/tool_enablement.json.")
+    for names in dup_schema:
+        if names not in dup_desc:
+            print(f"  • identical input schemas: {', '.join(names)}")
+            print("    Expected here (shared factory) — the description must carry the distinction.")
+    print("!" * WIDTH)
+
+
 async def main(args: argparse.Namespace) -> None:
     mcp_url = args.url or os.getenv("MCP_URL", DEFAULT_MCP_URL)
     token = args.token or os.getenv("MCP_AUTH_TOKEN", DEFAULT_TOKEN)
@@ -131,15 +279,7 @@ async def main(args: argparse.Namespace) -> None:
             client_cm = Client(transport)
             async with client_cm as client:
                 tools = await client.list_tools()
-                print("=" * 78)
-                print(f"list_tools → {len(tools)} tool(s):")
-                for t in tools:
-                    print(f"  • {t.name}")
-                    print(f"      desc  : {(t.description or '').splitlines()[0][:100]}")
-                    props = list((t.inputSchema or {}).get("properties", {}).keys())
-                    required = (t.inputSchema or {}).get("required", [])
-                    print(f"      inputs: {props}  (required: {required})")
-                print("=" * 78)
+                print_tool_catalog(tools, raw=args.raw)
 
                 if args.list_only:
                     return
@@ -148,8 +288,8 @@ async def main(args: argparse.Namespace) -> None:
                 call_args = {"source_url": source_url}
                 if question:
                     call_args["question"] = question
-                print(f"\ncall Log_Analyzer_Visualizer(question={question!r}) …\n")
-                res = await client.call_tool("Log_Analyzer_Visualizer", call_args)
+                print(f"\ncall log_v_internal_only(question={question!r}) …\n")
+                res = await client.call_tool("log_v_internal_only", call_args)
 
                 print("┌" + "─" * 76 + "┐")
                 print("│ TOOL RESULT (the single text block the agent reasons over):")
@@ -184,6 +324,8 @@ if __name__ == "__main__":
     p.add_argument("--question", default=DEFAULT_QUESTION, help="natural-language question")
     p.add_argument("--no-question", action="store_true", help="omit the question (analyze+visualize)")
     p.add_argument("--list-only", action="store_true", help="just auth + list tools and exit")
+    p.add_argument("--raw", action="store_true",
+                   help="also dump each tool's raw JSON exactly as the MCP client receives it")
     p.add_argument("--url", default=None, help="MCP server URL (overrides MCP_URL / client.env)")
     p.add_argument("--token", default=None, help="bearer token (overrides MCP_AUTH_TOKEN / client.env)")
     p.add_argument("--host-ip", default=None,
