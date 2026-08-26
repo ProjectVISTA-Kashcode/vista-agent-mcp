@@ -22,22 +22,34 @@ The executor (:mod:`orchestrator.analyzer_client`) only ever runs a validated pl
 """
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlsplit
 
-from .models import AnalyzerDiscovery, AnalyzerRef, CallPlan
+from .models import AnalyzerDiscovery, AnalyzerParam, AnalyzerRef, CallPlan
 
 # Placeholders the AI Controller may use in field values instead of echoing content back to us.
-# Keeping the *content* out of the model's answer means a long question can never be truncated,
-# reworded or quoted wrong on the way to an analyzer.
+# Keeping the *content* out of the model's answer means a long question — or a whole config file
+# — can never be truncated, reworded or quoted wrong on the way to an analyzer.
 PH_QUESTION = "{{question}}"
 PH_FILENAME = "{{filename}}"
+# The uploaded file's TEXT, for an analyzer that takes content in a body/form param rather than
+# as a multipart upload. ORB's config-validate is exactly this: a JSON contract whose
+# `config_snippet` is the config itself. Without this placeholder a JSON-contract analyzer could
+# never receive the file at all.
+PH_FILE_TEXT = "{{file_text}}"
 
 # Name heuristics used ONLY by the deterministic builder (the AI Controller reads the real
 # param descriptions instead of guessing from names).
 QUESTION_ALIASES = {"question", "query", "prompt", "ask", "user_question", "q", "text"}
 FILENAME_ALIASES = {"filename", "file_name", "name", "log_name"}
+# Checked BEFORE the question aliases: a param named for the file's content wants the content.
+FILE_TEXT_ALIASES = {"config_snippet", "config_text", "file_text", "file_content", "content",
+                     "snippet", "config", "log_text"}
 
 MAX_FIELD_CHARS = 20000
+# A config or log pasted into a body param is legitimately large; capping it at MAX_FIELD_CHARS
+# would silently validate only the first page of a real FortiGate config.
+MAX_FILE_TEXT_CHARS = int(__import__("os").getenv("MAX_FILE_TEXT_CHARS", "400000"))
 
 
 def _origin(url: str) -> str:
@@ -57,14 +69,32 @@ def _form_params(disc: AnalyzerDiscovery) -> list:
     return [p for p in disc.query.params if not (p.location == "file" or p.type == "file")]
 
 
-def _resolve(value: str, question: str, filename: str) -> str:
+def _resolve(value: str, question: str, filename: str, file_text: str = "") -> str:
     """Substitute the placeholders the AI Controller is told to use."""
     out = str(value if value is not None else "")
+    had_file = PH_FILE_TEXT in out
     if PH_QUESTION in out:
         out = out.replace(PH_QUESTION, question or "")
     if PH_FILENAME in out:
         out = out.replace(PH_FILENAME, filename or "")
-    return out[:MAX_FIELD_CHARS]
+    if had_file:
+        out = out.replace(PH_FILE_TEXT, file_text or "")
+    return out[:MAX_FILE_TEXT_CHARS if had_file else MAX_FIELD_CHARS]
+
+
+def _typed(param: AnalyzerParam | None, resolved: str) -> Any:
+    """Cast a resolved string to the param's DECLARED type (see AnalyzerParam.coerce)."""
+    return param.coerce(resolved) if param is not None else resolved
+
+
+def decode_text(file_bytes: bytes) -> str:
+    """The uploaded file as text, for {{file_text}}. Lossy rather than fatal on odd encodings."""
+    if not file_bytes:
+        return ""
+    try:
+        return file_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return file_bytes.decode("utf-8", errors="replace")
 
 
 def describe_contract(ref: AnalyzerRef, disc: AnalyzerDiscovery) -> str:
@@ -87,7 +117,7 @@ def describe_contract(ref: AnalyzerRef, disc: AnalyzerDiscovery) -> str:
     if q.params:
         for p in q.params:
             req = "required" if p.required else "optional"
-            dft = f", default={p.default!r}" if p.default else ""
+            dft = f", default={p.default!r}" if p.default not in (None, "") else ""
             desc = f" — {p.description}" if p.description else ""
             lines.append(f"      · param \"{p.name}\" ({req}, type={p.type}, "
                          f"location={p.location}{dft}){desc}")
@@ -97,28 +127,37 @@ def describe_contract(ref: AnalyzerRef, disc: AnalyzerDiscovery) -> str:
 
 
 def deterministic(ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
-                  filename: str) -> CallPlan:
+                  filename: str, file_text: str = "") -> CallPlan:
     """Build the request straight from the discovery document — no AI involved.
 
     This is the fallback whenever the AI Controller is off, unreachable, or produced something
     unusable, and it is also the reference every AI plan is validated against.
+
+    For the standard ``file`` + ``question`` contract this produces byte-for-byte the request
+    VISTA-MCP has always sent — that regression floor is asserted in ``tests/``.
     """
     q = disc.query
     files = _file_params(disc)
-    fields: dict[str, str] = {}
+    fields: dict[str, Any] = {}
     notes: list[str] = []
 
     for p in _form_params(disc):
         low = p.name.lower()
-        if low in QUESTION_ALIASES:
+        if low in FILE_TEXT_ALIASES and file_text:
+            # A body/form param named for the file's content, on a contract that declares no
+            # file upload — send the content. Without this an analyzer like ORB's
+            # config-validate would be called with an empty snippet.
+            fields[p.name] = file_text[:MAX_FILE_TEXT_CHARS]
+        elif low in QUESTION_ALIASES:
             if question:
                 fields[p.name] = question[:MAX_FIELD_CHARS]
             elif p.required:
                 fields[p.name] = p.default
         elif low in FILENAME_ALIASES:
             fields[p.name] = filename
-        elif p.default:
+        elif p.default not in (None, ""):
             # The analyzer advertised a default — the correct value to send without an AI.
+            # (`not in (None, "")` rather than truthiness: `false` and `0` are real defaults.)
             fields[p.name] = p.default
         elif p.required:
             # A required field we have no value for and the analyzer suggested none. Send it
@@ -127,6 +166,9 @@ def deterministic(ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
             fields[p.name] = ""
             notes.append(f'required param "{p.name}" has no default and no known value '
                          f'— sent empty (the AI Controller is the intended source for this)')
+        else:
+            continue
+        fields[p.name] = _typed(p, fields[p.name])
 
     return CallPlan(
         analyzer_id=ref.id,
@@ -141,7 +183,7 @@ def deterministic(ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
 
 
 def from_ai(raw: dict, ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
-            filename: str) -> CallPlan:
+            filename: str, file_text: str = "") -> CallPlan:
     """Validate one AI-Controller invocation against the discovery and return a safe plan.
 
     Every field is checked against what the analyzer actually advertised. Corrections are applied
@@ -149,7 +191,7 @@ def from_ai(raw: dict, ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
     the database), so an operator can always see the difference between what the model proposed
     and what was sent.
     """
-    base = deterministic(ref, disc, question, filename)
+    base = deterministic(ref, disc, question, filename, file_text)
     if not isinstance(raw, dict):
         return base
 
@@ -194,7 +236,9 @@ def from_ai(raw: dict, ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
     else:
         # The analyzer declared no file param. For a multipart contract the file still has to go
         # somewhere, so fall back to the same historic default the deterministic builder uses
-        # ("file"); for a JSON contract there is nothing to attach.
+        # ("file"). For a JSON contract there is nothing to attach as a multipart part — the file
+        # travels as text in a body field via {{file_text}}, which is a plan the AI is told to
+        # make and which needs no file_param at all.
         if file_param and file_param != base.file_param:
             notes.append(f'file_param "{file_param}" is not declared → "{base.file_param or "none"}"')
             corrected = True
@@ -215,11 +259,14 @@ def from_ai(raw: dict, ref: AnalyzerRef, disc: AnalyzerDiscovery, question: str,
                 notes.append(f'field "{name}" is not declared by the analyzer → dropped')
                 corrected = True
                 continue
-            resolved = _resolve(value if isinstance(value, str) else str(value), question, filename)
             param = declared_form.get(name)
+            resolved = _resolve(value if isinstance(value, str) else str(value),
+                                question, filename, file_text)
+            # Emptiness is judged on the STRING, before casting: a boolean param whose value is
+            # "false" casts to False, which is falsy but entirely meaningful.
             if not resolved and param is not None and not param.required:
                 continue                              # optional + empty ⇒ omit (as we always have)
-            fields[name] = resolved
+            fields[name] = _typed(param, resolved)
     elif raw_fields is not None:
         notes.append("fields was not an object → rebuilt from the discovery")
         corrected = True

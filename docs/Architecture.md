@@ -57,14 +57,24 @@ concatenate → ORB (if enabled) → answer back`.**
 See [`analyzer_api.md`](analyzer_api.md). Every analyzer exposes:
 
 - `GET  <base>/discover` → **AnalyzerDiscovery** (what it is + **how to call it**, incl. `when_to_use`)
-- `POST <query.path>` (multipart: file + declared params) → **AnalyzerResult** (`report_markdown`)
+- `POST <query.path>` (multipart **or JSON**: the declared params) → **AnalyzerResult**
 
 Because the *shapes* are fixed, the orchestrator has exactly **one** discover function
 (`discovery.py`), **one** call function (`analyzer_client.py`), and **one** read path
-(`report_markdown`). LogV implements this contract in its own repo
+(`report.py`). LogV implements this contract in its own repo
 (`backend/src/logviz/api/discover.py` + `…/v1/mcp_run.py`); the fakes implement it in
 `fakes/fake_analyzer.py` and `fakes/fake_analyzer_v2.py`. **The orchestrator shares zero code with
 any analyzer.**
+
+Two things the contract deliberately does *not* pin down:
+
+- **How many analyzers one URL advertises.** A `/discover` may return a single analyzer, or a
+  **catalog** — `{"schema_version": "1.0", "analyzers": [ … ]}`. ORB does the latter:
+  `https://vista.fortinet.com/orb/discover` advertises `config-extract` and `config-validate`
+  together, and the individual routes have no `/discover` of their own. A config entry either
+  picks one out of a catalog (`catalog_select`) or expands into all of them (§2c).
+- **Whether a result is markdown.** An analyzer that returns `{ok, reasoning, result, meta}`
+  instead of `report_markdown` is normalised into a section by `report.py` (§4f).
 
 ### 2b. The *contents* of that contract are read live, every call
 The shapes are fixed; the **details are not**. An analyzer may rename a param, add a required one,
@@ -122,8 +132,13 @@ never escapes as a raw MCP error; it always returns a string.
 
 4. **DISCOVER TOOLS** (`discovery.py`) — `GET <base>/discover` for **every** configured analyzer,
    **concurrently**, fail-soft. An analyzer that doesn't answer is dropped (logged) and simply not
-   used this run. Tolerates an `ApiResponse` envelope (`data:{…}`). This is the only source of
-   truth for what each analyzer currently is and how it is called.
+   used this run. Tolerates an `ApiResponse` envelope (`data:{…}`), and understands **both**
+   discovery shapes: a single analyzer, or a **catalog** of several. A catalog entry resolves to
+   one analyzer (`catalog_select`) or **expands** into one runtime analyzer per route, named
+   `<entry id>:<route id>`, each inheriting the entry's mandatory/enabled/timeout. So the set that
+   runs is not necessarily the set in the config, and the step returns the expanded **runtime**
+   refs the rest of the pipeline works on. This is the only source of truth for what each
+   analyzer currently is and how it is called.
 
 5. **AI CONTROLLER** (`decide.py` + `ai_controller.py` + `plan.py`) — **always runs** (§4). It
    returns a `Decision`: the selected analyzer ids, the reason, and a validated **`CallPlan` per
@@ -149,9 +164,45 @@ never escapes as a raw MCP error; it always returns a string.
 
 ## 4. The AI Controller
 
-Formerly "the DeepSeek decision". Renamed because it now does more than pick analyzers, and
-because the gateway behind it is an implementation detail. It is still **only** a control-plane
-call — the analysis itself always belongs to the analyzers.
+Formerly "the DeepSeek decision". Renamed because it does more than pick analyzers, and because
+the gateway behind it is an implementation detail. It is still **only** a control-plane call — the
+analysis itself always belongs to the analyzers.
+
+### 4·0. It runs on Pydantic AI
+
+Every AI step is a **typed [Pydantic AI](https://ai.pydantic.dev) agent with a declared output
+model**, run against the Fortinet **AgentAssist** gateway — an OpenAI-compatible endpoint
+(`/v1/chat/completions`, vLLM behind it) that supports both `response_format: json_schema` and
+native tool calling.
+
+That means the orchestrator never hand-parses model text. The answer arrives already validated
+into a Pydantic object, and Pydantic AI re-prompts the model itself when it doesn't fit the
+schema. The old "ask for JSON, regex the first `{…}` out of the reply, hope" path is gone.
+
+**Three model tiers**, chosen per task rather than one model for everything
+(`orchestrator/ai_model.py`):
+
+| tier | default model | used for | typical |
+|---|---|---|---|
+| `fast` | `model-fast` | routing + invocation planning — runs on **every** job | ~0.7 s |
+| `pro`  | `model-pro`  | authoring — drafting a whole tool config from a discovery document | ~4 s |
+| `long` | `model-long` | large inputs — rendering a big analyzer result into markdown | varies |
+
+One module builds every model, so all of them share the provider, the timeout, and — via
+`tlsconf` — the *same outbound TLS policy* as every other call the server makes. An internal-CA
+gateway needs no special case.
+
+**Three agents** (`orchestrator/ai_controller.py`):
+
+| agent | tier | job |
+|---|---|---|
+| `route_and_plan` | fast | §4a — which analyzers, and how to call each |
+| `render_report`  | long | §4f — a result that carries no `report_markdown` |
+| `draft_tool`     | pro  | §4g — a whole tool entry from a discovery URL |
+
+Env: `AGENTASSIST_BASE_URL`, `AGENTASSIST_API_KEY`, `AI_MODEL_FAST` / `_PRO` / `_LONG`,
+`AI_TIMEOUT`, `AI_TEMPERATURE` (0 — these are decisions, not prose). `AI_CONTROLLER_ENABLED=0`,
+**or simply an unset API key**, forces the fully deterministic path (§4e).
 
 ### 4a. It has two jobs
 
@@ -176,22 +227,35 @@ still reads the fresh contracts. Discovery decides *what is possible*; the contr
 ### 4c. The prompt
 
 ```
-   <tool's routing_system_prompt   (or the generic default if unset)>
+   <tool's routing_system_prompt   (or the generic default if unset)>   ← per tool, editable
    +
-   <fixed OUTPUT CONTRACT: 'return only {"call":[…],"reason":…,"invocations":[…]}'>  ← machinery
+   <fixed agent CONTRACT: the planning rules>                           ← machinery
    +
-   <the input file name/size, the user's question>
+   <the input file name/size (or "none"), the user's question>
    +
    <every analyzer's LIVE contract: when_to_use, method, URL, content type,
     and each declared param: name, required, type, location, default, description>
 ```
 
-A tool author can rewrite the *guidance* freely — to justify and match that tool's description —
-without ever breaking the decision parsing. The exact system prompt used is stored on the
-`Decision`, surfaced on the AI Controller node in the GUI, and written to the database.
+The response *shape* is no longer part of the prompt at all — it is the agent's Pydantic output
+model, enforced by the schema. So a tool author can rewrite the *guidance* freely, to justify and
+match that tool's description, with **no way to break the decision parsing**. The exact prompt
+used is stored on the `Decision`, surfaced on the AI Controller node in the GUI, and written to
+the database.
 
-Field values use placeholders (`{{question}}`, `{{filename}}`) rather than echoing content, so a
-long question can never be truncated, reworded or re-quoted on its way to an analyzer.
+Field values use **placeholders** rather than echoing content, so a long question — or a whole
+config file — can never be truncated, reworded or re-quoted on its way to an analyzer:
+
+| placeholder | resolves to |
+|---|---|
+| `{{question}}` | the user's question |
+| `{{filename}}` | the uploaded file's name |
+| `{{file_text}}` | the uploaded file's **text** — for a JSON-contract analyzer that takes content in a body param instead of as a multipart upload |
+
+Planned field *values* are always typed `str` in the schema, even for a boolean or integer param.
+Free-form JSON values are the part of a structured answer models get wrong most often, and the
+real type is already in the discovery — so the cast happens deterministically in
+`AnalyzerParam.coerce`, not in the model's head.
 
 ### 4d. Validation — the model never gets the last word
 
@@ -204,7 +268,8 @@ long question can never be truncated, reworded or re-quoted on its way to an ana
 | `content_type` | must equal the discovered content type, else corrected |
 | `file_param` | must be a declared `location:"file"` param, else the first declared one |
 | `fields` | only declared params survive; unknown keys are dropped |
-| required params | anything missing is filled from the discovery (its `default`, else the question/filename heuristics) |
+| field types | each surviving value is cast to the param's **declared** type (`boolean` → real `true`, not `"true"`) |
+| required params | anything missing is filled from the discovery (its `default`, else the question/filename/file-text heuristics) |
 
 Every correction is recorded in `CallPlan.notes`, shown on the node in the GUI, and stored per
 analyzer per job — so "what did the model propose vs. what did we send" is always answerable.
@@ -212,12 +277,52 @@ The plan's `source` ends up `ai`, `ai-corrected` or `deterministic`.
 
 ### 4e. Fail-safe
 
-If the AI gateway is disabled (`AI_CONTROLLER_ENABLED=0`), unreachable, or returns junk, the
-decision falls back to the **deterministic policy**: include every optional analyzer (better to
-over-analyze than to silently drop a relevant one) and build each request straight from its
-discovery document (`plan.py::deterministic`). For the standard `file` + `question` contract that
-produces byte-for-byte the request VISTA-MCP has always sent, so a gateway outage is invisible to
-clients — it costs breadth of judgement, never correctness.
+If the AI gateway is disabled (`AI_CONTROLLER_ENABLED=0` or no API key), unreachable, or answers
+unusably, the decision falls back to the **deterministic policy**: include every optional analyzer
+(better to over-analyze than to silently drop a relevant one) and build each request straight from
+its discovery document (`plan.py::deterministic`). For the standard `file` + `question` contract
+that produces byte-for-byte the request VISTA-MCP has always sent — asserted by
+`tests/test_orchestrator.py::logv_deterministic_plan_is_unchanged` — so a gateway outage is
+invisible to clients. It costs breadth of judgement, never correctness.
+
+Every AI entry point returns `None` on any failure and never raises. That guarantee is the reason
+the AI can be central without being load-bearing.
+
+### 4f. Rendering a result that has no markdown
+
+The contract says an analyzer returns `report_markdown`. Real ones don't always — ORB's routes
+return `{ok, reasoning, result, meta}` and nothing else. Before this, such a result validated
+fine and contributed an **empty** section, so a job whose only analyzer was ORB reported "No
+analyzer produced a result."
+
+`orchestrator/report.py` normalises any payload into a section, in three tiers — first one that
+yields text wins:
+
+1. **`native`** — `report_markdown` is present. Returned untouched. *This is the LogV path; nothing
+   below can affect it.*
+2. **`rendered`** — a deterministic renderer walks the result. It knows the shapes VISTA analyzers
+   emit (`reasoning`, `snippets`, `counts`, `flagged`, `structural`) and falls back to a generic
+   recursive walk. **No AI**, so a new analyzer works with the controller switched off.
+3. **`ai`** — the `render_report` agent on the *long* model. Used only when tier 2 comes out thin
+   against a payload that clearly carries more (`AI_REPORT_RENDER=auto`, the default), always
+   (`=1`), or never (`=0`).
+
+Which tier produced a section is recorded on the analyzer's `meta.report_source`.
+
+### 4g. Drafting a tool from a discovery URL
+
+The console's **✨ Build with AI** button posts a discovery URL to `/gui/api/ai_build_tool`. The
+server probes it — single analyzer *or catalog* — hands the real document to the `pro` model, and
+gets back a complete TOOL_ENABLEMENT entry: tool name, client-facing description, routing prompt,
+and one analyzer entry per route.
+
+The draft is then **validated against the discovery it was drafted from**, exactly as a call plan
+is (§4d): a `catalog_select` naming a route that doesn't exist is re-matched or dropped, a
+`discover_url` that isn't a `/discover` endpoint is normalised or cleared, empty titles are filled
+from the document. Corrections are returned as `fixes` and shown in the dialog.
+
+**Nothing is saved.** The draft lands in the editor for review and only reaches `list_tools` via
+the normal validated + audited `POST /gui/api/config` save.
 
 ---
 
@@ -321,11 +426,14 @@ orchestrator/
                               CallPlan/Decision/AnalyzerRun/Job
   tool_enablement.py          load/get/reload/save the config (cached, safe default)
   vfr.py                      VFR — passthrough today (real routing seam; see below)
-  discovery.py                GET /discover for all analyzers, concurrent, fail-soft (+ probe())
-  ai_controller.py            the AI gateway client (ask + JSON extraction), fail-safe
+  discovery.py                GET /discover for all analyzers, concurrent, fail-soft (+ probe());
+                              understands a SINGLE analyzer or a CATALOG of several
+  ai_model.py                 the Pydantic AI foundation: provider, fast/pro/long tiers, fail-safe run()
+  ai_controller.py            the three typed agents: route_and_plan · render_report · draft_tool
   decide.py                   the AI Controller decision: selection + per-analyzer invocation plans
   plan.py                     build a CallPlan from discovery · validate an AI plan against it
   analyzer_client.py          the ONE generic call — executes a validated plan (never raises)
+  report.py                   normalise any analyzer result into a markdown section (native/rendered/ai)
   orb.py                      ORB ask (fail-open) → "## ORB Suggestions"
   pipeline.py                 the whole flow, wired together, always returns a string
   jobs.py                     job/flow registry → CLI logs + GUI + database
@@ -334,6 +442,7 @@ orchestrator/
 gui/index.html                the operator console (Flow · Dashboard · History)
 fakes/fake_analyzer.py        a reference analyzer following the contract
 fakes/fake_analyzer_v2.py     the same contract with a DIFFERENT request shape (dynamic-discovery test)
+tests/test_orchestrator.py    runnable checks: LogV regression floor · catalogs · typing · rendering · live
 docs/                         analyzer_api.md · Architecture.md · how_to_add_analyzer.md ·
                               gui_guide.md · db_setup.md (+ .sql) · testing.md
 ```

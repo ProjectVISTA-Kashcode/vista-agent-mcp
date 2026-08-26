@@ -23,6 +23,10 @@ Run (server must be reachable):
     python client_test.py --url https://vista.fortinet.com/mcp --token 'gp9$_I38y3_'
     # NOTE: no trailing slash on the proxied prod URL — `/mcp/` 307-redirects to `/mcp` and the
     # redirect drops the Authorization header (→ 401). Local/LAN URLs work either way.
+    python client_test.py --tool FortiGate_Config_Validator \
+        --question "is this valid on 7.4.11? config router bgp
+ set as 65001
+end"
     python client_test.py --no-question                        # analyze + visualize only
     python client_test.py --host-ip 203.0.113.7                # advertise a public IP for the log
     python client_test.py --list-only                          # just auth + the tool catalog
@@ -250,6 +254,26 @@ def _report_ambiguity(tools) -> None:
     print("!" * WIDTH)
 
 
+# Tool names that have historically been the default target, most-specific first. Used only
+# when --tool is not given, so the canonical command line keeps working against prod (which
+# exposes `log_v_internal_only`) AND against a local config (which may not).
+PREFERRED_TOOLS = ("log_v_internal_only", "Log_Analyzer_Visualizer")
+
+
+def pick_tool(tools, wanted: str):
+    """Resolve --tool, else the first preferred name present, else the only/first tool."""
+    by_name = {t.name: t for t in tools}
+    if wanted:
+        if wanted in by_name:
+            return by_name[wanted]
+        lowered = {n.lower(): t for n, t in by_name.items()}
+        return lowered.get(wanted.lower())
+    for name in PREFERRED_TOOLS:
+        if name in by_name:
+            return by_name[name]
+    return tools[0] if tools else None
+
+
 async def main(args: argparse.Namespace) -> None:
     mcp_url = args.url or os.getenv("MCP_URL", DEFAULT_MCP_URL)
     token = args.token or os.getenv("MCP_AUTH_TOKEN", DEFAULT_TOKEN)
@@ -285,11 +309,28 @@ async def main(args: argparse.Namespace) -> None:
                     return
 
                 question = "" if args.no_question else args.question
-                call_args = {"source_url": source_url}
+                tool = pick_tool(tools, args.tool)
+                if tool is None:
+                    raise SystemExit(
+                        f"\n✗ no such tool: {args.tool!r}\n  available: "
+                        + ", ".join(t.name for t in tools))
+
+                # Send the file only when THIS tool actually wants one. A text-input tool
+                # (require_source_url=false in the server's config, so `source_url` is not in
+                # its schema's `required`) is called with the question alone.
+                needs_file = "source_url" in ((tool.inputSchema or {}).get("required") or [])
+                call_args = {}
                 if question:
                     call_args["question"] = question
-                print(f"\ncall log_v_internal_only(question={question!r}) …\n")
-                res = await client.call_tool("log_v_internal_only", call_args)
+                if needs_file or args.with_file:
+                    call_args["source_url"] = source_url
+                else:
+                    print("  (this tool does not require a file — calling it with the question "
+                          "only; pass --with-file to send one anyway)")
+                print(f"\ncall {tool.name}(" +
+                      ", ".join(f"{k}={v!r}" if k != "source_url" else "source_url=<served>"
+                                for k, v in call_args.items()) + ") …\n")
+                res = await client.call_tool(tool.name, call_args)
 
                 print("┌" + "─" * 76 + "┐")
                 print("│ TOOL RESULT (the single text block the agent reasons over):")
@@ -323,6 +364,11 @@ if __name__ == "__main__":
     p.add_argument("--file", default=DEFAULT_FILE, help="log file to serve as the injected URL")
     p.add_argument("--question", default=DEFAULT_QUESTION, help="natural-language question")
     p.add_argument("--no-question", action="store_true", help="omit the question (analyze+visualize)")
+    p.add_argument("--tool", default="",
+                   help="tool to call (default: log_v_internal_only, else Log_Analyzer_Visualizer, "
+                        "else the first tool the server lists)")
+    p.add_argument("--with-file", action="store_true",
+                   help="send source_url even to a tool that does not require a file")
     p.add_argument("--list-only", action="store_true", help="just auth + list tools and exit")
     p.add_argument("--raw", action="store_true",
                    help="also dump each tool's raw JSON exactly as the MCP client receives it")

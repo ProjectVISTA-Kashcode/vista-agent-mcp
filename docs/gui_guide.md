@@ -78,6 +78,24 @@ Everything is deep-linkable, so a view or a specific job can be pasted into a ti
 
 ## 3. Add a new MCP tool
 
+### 3a. ✨ Build with AI (the fast path)
+
+**Add / Edit Tools → ✨ Build with AI.** Paste an analyzer's base URL, optionally add a hint, and
+press **Draft it**. The server fetches its `/discover` — a single analyzer **or a catalog of
+several** — and the `pro` model drafts the whole entry: name, client-facing description, routing
+prompt, ORB toggle, whether it needs an uploaded file, and one analyzer entry per route.
+
+The draft is checked against the discovery it came from before you see it (a `catalog_select` that
+names no real route is dropped, a `discover_url` that isn't a discovery endpoint is fixed), and any
+corrections are listed in the dialog.
+
+**Nothing is saved.** The draft is merged into the editor behind the dialog so you can review and
+change every field — the *description* especially, since it is the entire basis a calling agent
+has for choosing the tool. It reaches `list_tools` only when you press **Save & reload**. If a
+tool of that name already exists you are asked whether to add a copy or replace it.
+
+### 3b. The wizard (the manual path)
+
 **Add / Edit Tools → ＋ New tool** (or the **＋ add tool** chip in the tool bar) opens a 3-step
 wizard:
 
@@ -90,6 +108,17 @@ wizard:
 3. **Analyzers.** Paste a base URL and press **🔌 Test & autofill** — the console fetches
    `GET <base>/discover`, confirms the analyzer speaks the standard contract, shows its
    `when_to_use`, and fills in its id and title. Mark each **mandatory** or **optional**.
+   If the URL is a **catalog**, the panel lists every route it advertises and fills in
+   `catalog_select`; add another analyzer entry with the same `api_url` and a different
+   `catalog_select` to use more of them, or clear the field to expand them all.
+
+Two switches worth knowing on the tool card:
+
+- **requires an uploaded file** — on (default) means the MCP tool's `source_url` input is
+  required, as it has always been. Off makes it optional, for a tool whose analyzers take text —
+  e.g. validating a config snippet pasted into the question.
+- **ORB** — whether ORB troubleshooting is appended to this tool's report. Usually on for
+  log/diagnostic tools, off for config authoring or validation.
 
 On **Create tool** the server validates the config, writes `config/tool_enablement.json`,
 re-registers the live MCP tool set and audits the change. The tool is callable immediately — it

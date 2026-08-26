@@ -16,6 +16,29 @@ v2) · **8100** MCP server (+ `/gui`) · **5432** Postgres.
 
 ---
 
+## 0. The fast check: the test suite
+
+Most of what used to need a full manual run is now asserted:
+
+```bash
+cd /home/jaskirat/VISTA-MCP
+.venv/bin/python tests/test_orchestrator.py --offline   # no network — pure logic, <1s
+.venv/bin/python tests/test_orchestrator.py             # + live gateway, ORB and pipeline runs
+.venv/bin/python tests/test_orchestrator.py -k catalog  # one group
+```
+
+| group | what it protects |
+|---|---|
+| `regression` | the **LogV path cannot move** — the deterministic plan for the classic `file`+`question` contract is asserted byte-for-byte, and a config written before catalogs/text-tools still parses identically. Also fails if two tools end up with identical descriptions. |
+| `catalog` | a multi-analyzer `/discover` is parsed; an entry selects one route or expands into all |
+| `typing` | a `boolean` default survives (it used to raise and silently drop the analyzer); `{{file_text}}` resolves; invented params are still rejected |
+| `render` | a result with no `report_markdown` still produces a section; native markdown always wins |
+| `live` | AgentAssist answers, ORB discovery is a catalog, and each configured tool runs end to end |
+
+Run this first. If something here fails, the manual walkthrough below will only confuse you.
+
+---
+
 ## 1. Start the analyzers
 
 **LogV (the mandatory analyzer) — run the REAL backend so it does REAL AI analysis.** This is the
@@ -64,12 +87,23 @@ curl -s http://127.0.0.1:8813/perf2/discover | head -c 200; echo
 
 ```bash
 cd /home/jaskirat/VISTA-MCP
+.venv/bin/python server.py          # .env already has everything below
+```
+
+or spelled out:
+
+```bash
 MCP_HOST=0.0.0.0 MCP_PORT=8100 \
 MCP_AUTH_TOKEN='vista-test-strong-xyz' \
 MCP_ALLOW_PRIVATE_FETCH=1 \
 DATABASE_URL='postgresql+psycopg://jaskirat:jaskirat@localhost:5432/usage_logs' \
+AGENTASSIST_API_KEY='sk-…' \
 .venv/bin/python server.py
 ```
+
+> **The AI Controller needs `AGENTASSIST_API_KEY`.** Without it the banner prints
+> `AI Controller : OFF — AGENTASSIST_API_KEY is not set` and every job takes the deterministic
+> path. That is a supported mode (and worth testing), but it is not the intended one.
 
 The banner prints the tools, their analyzers (mandatory/optional), ORB state, the **AI Controller**
 endpoint, the **job history** connection, and the console URL:

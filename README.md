@@ -171,10 +171,16 @@ can reach the client at>`.)*
 | `ORB_ASK_URL` | `http://172.17.96.58:9345/orb/api/ask` | ORB "ask" API queried after the analysis for troubleshooting steps |
 | `ORB_USERNAME` | `logV_mcp_call` | `username` sent to ORB |
 | `ORB_TIMEOUT` | `180` | ORB request timeout (s) — ORB is deep-research and slow (~45–140 s); fail-open on timeout |
-| `AI_CONTROLLER_ENABLED` | `1` | `0` turns the AI Controller off — routing and every request fall back to the deterministic, discovery-built policy |
-| `AI_CONTROLLER_GEN_URL` | `https://vista.fortinet.com/ai-mcp/ds4/generate` | AI gateway used for the routing + invocation decision (legacy name `DEEPSEEK_GEN_URL` still honoured) |
-| `AI_CONTROLLER_FALLBACK_URL` | `https://vista.fortinet.com/ai-mcp/generate` | secondary gateway (legacy `ANALYSIS_API_URL`) |
-| `AI_CONTROLLER_TIMEOUT` | `60` | gateway read timeout (s) (legacy `DEEPSEEK_TIMEOUT`) |
+| `AI_CONTROLLER_ENABLED` | `1` | `0` turns **every** AI step off — routing and every request fall back to the deterministic, discovery-built policy |
+| `AGENTASSIST_BASE_URL` | `https://agentassist.corp.fortinet.com/v1` | OpenAI-compatible gateway the Pydantic AI agents run against |
+| `AGENTASSIST_API_KEY` | _(unset)_ | **required for any AI step to run.** Unset ⇒ the controller reports `OFF — AGENTASSIST_API_KEY is not set` and everything takes the deterministic path |
+| `AI_MODEL_FAST` | `model-fast` | tier used for routing + invocation planning (every job) |
+| `AI_MODEL_PRO` | `model-pro` | tier used to draft a tool config from a discovery URL |
+| `AI_MODEL_LONG` | `model-long` | tier used to render a large analyzer result into markdown |
+| `AI_TIMEOUT` | `60` | per-request timeout (s) |
+| `AI_TEMPERATURE` | `0` | these are decisions, not prose |
+| `AI_REPORT_RENDER` | `auto` | rendering of results with no `report_markdown`: `auto` = deterministic, AI only when thin · `1` = always AI · `0` = never |
+| `MAX_FILE_TEXT_CHARS` | `400000` | cap on file text substituted into a body param via `{{file_text}}` |
 | `DATABASE_URL` | _(unset)_ | Postgres for durable job history + console analytics, e.g. `postgresql+psycopg://user:pass@host:5432/usage_logs`. Unset ⇒ history off, everything else unchanged. See [docs/db_setup.md](docs/db_setup.md) |
 | `MCP_DB_AUTO_CREATE` | `1` | `0` skips `CREATE TABLE IF NOT EXISTS` (prod: create the schema by hand) |
 | `MCP_DB_STORE_REPORTS` | `1` | `0` stores report lengths but not the text |

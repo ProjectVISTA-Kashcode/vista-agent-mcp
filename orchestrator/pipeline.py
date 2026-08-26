@@ -110,11 +110,21 @@ async def run(tool_name: str, file_bytes: bytes, filename: str, question: str = 
 
         # 3) DISCOVER TOOLS — query each analyzer's /discover (async, fail-soft). This is where
         #    an analyzer's CURRENT contract comes from; nothing about it is assumed here.
-        jobs.emit(job_id, "discover", "running", f"{len(refs)} analyzer(s) · concurrent")
-        discoveries = await discovery.discover(refs)
-        mandatory_ok = [r for r in mandatory if r.id in discoveries]
-        optional_ok = [r for r in optional if r.id in discoveries]
-        dropped = [r.id for r in refs if r.id not in discoveries]
+        jobs.emit(job_id, "discover", "running", f"{len(refs)} config entry(s) · concurrent")
+        discoveries, runtime_refs, dropped = await discovery.discover(refs)
+        # A CATALOG entry (one /discover advertising several analyzers, as ORB does) expands into
+        # several runtime analyzers, so the set that actually runs is not the set in the config.
+        # Re-seed the records off the runtime refs, keeping a record for each config entry that
+        # failed discovery so history still shows why it dropped out.
+        records = {r.id: _run_record(r) for r in refs if r.id in dropped}
+        for r in runtime_refs:
+            records[r.id] = _run_record(r)
+        refs = runtime_refs
+        mandatory_ok = [r for r in runtime_refs if r.mandatory]
+        optional_ok = [r for r in runtime_refs if not r.mandatory]
+        if [r.id for r in runtime_refs] != [r.id for r in mandatory + optional if r.id not in dropped]:
+            jobs.set_meta(job_id, mandatory_ids=[r.id for r in mandatory_ok],
+                          optional_ids=[r.id for r in optional_ok])
         for rid, disc in discoveries.items():
             rec = records.get(rid)
             if rec is not None:
@@ -140,10 +150,13 @@ async def run(tool_name: str, file_bytes: bytes, filename: str, question: str = 
         # 4) AI CONTROLLER — ALWAYS runs. Picks the optional analyzers AND plans every call from
         #    the discovery documents fetched a moment ago (see orchestrator/decide.py).
         jobs.emit(job_id, "ai_controller", "running", "reading live analyzer contracts")
+        # Decoded once per job: an analyzer with a JSON contract takes the file as TEXT in a body
+        # param ({{file_text}}) rather than as a multipart upload.
+        file_text = plan_mod.decode_text(file_bytes)
         decision = await decide.decide(
             question, mandatory_ok, optional_ok, discoveries,
             routing_system_prompt=cfg.routing_system_prompt,
-            filename=filename, file_bytes=len(file_bytes),
+            filename=filename, file_bytes=len(file_bytes), file_text=file_text,
         )
         jobs.set_meta(job_id, used_ai=decision.used_ai, ai_mode=decision.mode,
                       ai_reason=decision.reason, ai_system_prompt=decision.system_prompt,
@@ -168,7 +181,8 @@ async def run(tool_name: str, file_bytes: bytes, filename: str, question: str = 
         results = await asyncio.gather(*[
             _call_one(job_id, r, discoveries[r.id],
                       decision.plans.get(r.id)
-                      or plan_mod.deterministic(r, discoveries[r.id], question, filename),
+                      or plan_mod.deterministic(r, discoveries[r.id], question, filename,
+                                                file_text),
                       file_bytes, filename, question, records[r.id])
             for r in selected_refs
         ])

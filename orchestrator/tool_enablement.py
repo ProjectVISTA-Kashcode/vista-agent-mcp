@@ -13,6 +13,15 @@ Per-analyzer fields (see :class:`~orchestrator.models.AnalyzerRef`):
     discover_url empty → derived as ``api_url + "/discover"``
     mandatory    true → ALWAYS called; false → the AI Controller decides from the user's question
     enabled      false → ignored entirely
+    catalog_select  for a /discover that advertises SEVERAL analyzers (ORB), the one this entry
+                    means; empty → match by id, else expand every analyzer in the catalog
+
+Per-tool fields (see :class:`~orchestrator.models.ToolConfig`):
+    description            client-facing text shown in list_tools
+    routing_system_prompt  this tool's AI Controller guidance section
+    orb_enabled            append ORB troubleshooting to this tool's report
+    require_source_url     false → the MCP tool's `source_url` input becomes OPTIONAL, for a tool
+                           whose analyzers take text rather than an uploaded file
 """
 from __future__ import annotations
 
@@ -89,6 +98,9 @@ def _parse(raw: dict) -> dict[str, ToolConfig]:
             description=spec.get("description", ""),
             routing_system_prompt=spec.get("routing_system_prompt", ""),
             orb_enabled=bool(spec.get("orb_enabled", True)),
+            # Absent ⇒ True, so every config written before text-input tools existed keeps the
+            # required-source_url surface it has always had.
+            require_source_url=bool(spec.get("require_source_url", True)),
             analyzers=analyzers,
         )
     return out

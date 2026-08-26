@@ -10,4 +10,8 @@ dependencies = [
     # Durable job history + GUI dashboard/history. Optional at runtime: without it (or without
     # DATABASE_URL) the server runs exactly as before, with the live in-memory view only.
     "psycopg[binary,pool]>=3.1",
+    # Every AI step in the orchestrator is a typed Pydantic AI agent (routing + invocation
+    # planning, result rendering, tool-config drafting) against the OpenAI-compatible
+    # AgentAssist gateway. The [openai] extra brings the OpenAI-protocol model/provider.
+    "pydantic-ai-slim[openai]>=2.0",
 ]

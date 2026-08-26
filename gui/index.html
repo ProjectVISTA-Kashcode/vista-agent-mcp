@@ -641,11 +641,45 @@
 </section>
 
 <!-- ============================ MODALS ============================ -->
+<div class="modal" id="aiModal" role="dialog" aria-modal="true" aria-label="Build a tool with AI">
+  <div class="sheet">
+    <div class="sheet-hd">
+      <h2><span class="logo">✨</span>Build a tool with AI</h2>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn sm ghost icon" id="aiClose" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-bd">
+      <div class="hint">
+        Paste an analyzer's base URL. This fetches its <code style="font-family:var(--mono)">/discover</code>
+        — a single analyzer <b>or a catalog</b> — and the <b>pro</b> model drafts the whole tool entry
+        from what it actually advertises: name, client-facing description, routing prompt, and one
+        analyzer entry per route. <b>Nothing is saved.</b> The draft lands in the editor for you to
+        review and change; it only goes live when you press <b>Save &amp; reload</b>.
+      </div>
+      <div class="field">
+        <label class="f">Analyzer base URL<span class="tip">/discover is derived from it</span></label>
+        <input type="text" id="aiUrl" placeholder="https://vista.fortinet.com/orb">
+      </div>
+      <div class="field">
+        <label class="f">Hint (optional)<span class="tip">anything the discovery doesn't say — who it is for, what to emphasise, whether it should be mandatory</span></label>
+        <input type="text" id="aiHint" placeholder="expose only the config validation route; no ORB">
+      </div>
+      <div class="probe-result" id="aiOut" style="display:none"></div>
+    </div>
+    <div class="sheet-ft">
+      <span class="savemsg" id="aiMsg"></span>
+      <button class="btn" id="aiCancel">Cancel</button>
+      <button class="btn primary" id="aiGo">✨ Draft it</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Tool configuration">
   <div class="sheet wide">
     <div class="sheet-hd">
       <h2><span class="logo">⚙</span>Tools &amp; Analyzers</h2>
       <div class="spacer" style="flex:1"></div>
+      <button class="btn sm" id="aiBuildBtn" title="Paste an analyzer's discover URL and let the AI Controller draft the whole tool entry">✨ Build with AI</button>
       <button class="btn sm" id="wizardBtn">＋ New tool</button>
       <button class="btn sm ghost rawtoggle" id="rawToggle">⟷ Raw JSON</button>
       <button class="btn sm ghost icon" id="cfgClose" aria-label="Close">✕</button>
@@ -1822,6 +1856,63 @@ function openConfig(){
 }
 $("#cfgBtn").onclick=openConfig;
 $("#cancelBtn").onclick=$("#cfgClose").onclick=()=>$("#modal").classList.remove("show");
+
+/* ------------------- build a tool from a discover URL, with AI -------------------
+   Drafts only. The result is merged into the editor's in-memory config so the operator
+   reviews (and can edit) every field; it reaches list_tools only via Save & reload. */
+$("#aiBuildBtn").onclick=()=>{
+  if(rawMode){ RAW=(()=>{ try{ return JSON.parse($("#rawEditor").value); }catch(e){ return RAW; } })(); }
+  $("#aiOut").style.display="none"; $("#aiMsg").textContent="";
+  $("#aiModal").classList.add("show"); setTimeout(()=>$("#aiUrl").focus(),50);
+};
+$("#aiCancel").onclick=$("#aiClose").onclick=()=>$("#aiModal").classList.remove("show");
+$("#aiUrl").onkeydown=e=>{ if(e.key==="Enter") $("#aiGo").click(); };
+
+$("#aiGo").onclick=async()=>{
+  const url=($("#aiUrl").value||"").trim();
+  const hint=($("#aiHint").value||"").trim();
+  const out=$("#aiOut"), go=$("#aiGo");
+  if(!url){ $("#aiUrl").classList.add("err"); toast("Paste the analyzer's base URL first","err"); return; }
+  $("#aiUrl").classList.remove("err");
+  out.style.display="block"; out.className="probe-result";
+  out.textContent="fetching /discover and drafting the tool … (the pro model, a few seconds)";
+  go.disabled=true; $("#aiMsg").textContent="";
+  try{
+    const r=await fetch(API+"ai_build_tool",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({url,hint})});
+    const d=await r.json();
+    if(!d.ok){
+      out.className="probe-result bad";
+      out.innerHTML=`✖ ${esc(d.error||"no answer")}`;
+      return;
+    }
+    let name=d.tool_name;
+    if(RAW.tools && RAW.tools[name]){
+      // Never silently overwrite a tool that is already live — especially not a prod one.
+      const alt=`${name}_2`;
+      out.className="probe-result";
+      const asCopy=confirm(`A tool named "${name}" already exists.\n\nOK  — add the draft as "${alt}", leaving "${name}" untouched.\nCancel — replace the existing "${name}" with the draft.`);
+      if(asCopy) name=alt;
+    }
+    RAW.tools=RAW.tools||{};
+    RAW.tools[name]=d.tool;
+    buildForm();
+    out.className="probe-result ok";
+    const ans=(d.tool.analyzers||[]).map(a=>
+      `<li><code style="font-family:var(--mono)">${esc(a.id)}</code> — ${esc(a.title||"")}
+       ${a.mandatory?"<b>mandatory</b>":"optional"}${a.catalog_select?` · catalog_select=<code style="font-family:var(--mono)">${esc(a.catalog_select)}</code>`:""}</li>`).join("");
+    out.innerHTML=`✔ drafted <b>${esc(name)}</b> from a ${esc(d.kind)} document
+      <ul style="margin:6px 0 0 16px;padding:0">${ans}</ul>
+      <span class="wu">${esc(d.reason||"")}<br>
+      ${(d.fixes&&d.fixes.length)?`<b>corrected against the live discovery:</b> ${esc(d.fixes.join("; "))}<br>`:""}
+      ORB ${d.tool.orb_enabled?"on":"off"} · source_url ${d.tool.require_source_url?"required":"OPTIONAL (text-input tool)"}
+      · ${esc(d.note||"")} · ${d.elapsed_ms}ms<br>
+      <b>Not saved yet</b> — review it in the editor behind this dialog, then press “Save &amp; reload”.</span>`;
+    toast(`Drafted “${name}” — review it, then Save & reload`,"ok");
+  }catch(e){
+    out.className="probe-result bad"; out.textContent="✖ "+e.message;
+  }finally{ go.disabled=false; }
+};
 $("#rawToggle").onclick=()=>{
   if(!rawMode){
     RAW=collectForm()||RAW;
@@ -1906,6 +1997,10 @@ function toolBlock(name,t){
         <label class="f">AI Controller routing prompt<span class="tip">this tool's own guidance for choosing optional analyzers — the JSON output contract is appended automatically</span></label>
         <textarea data-tool="${esc(name)}|routing_system_prompt" rows="3" class="mono" placeholder="You are the analyzer router for …">${esc(t.routing_system_prompt||"")}</textarea>
       </div>
+      <label class="switch" style="margin:2px 0 10px">
+        <input type="checkbox" data-tool="${esc(name)}|require_source_url" ${t.require_source_url===false?"":"checked"}>
+        requires an uploaded file
+        <span class="tip">on = the MCP tool's <code>source_url</code> input is REQUIRED (every log/config tool). Off = it becomes OPTIONAL, for a tool whose analyzers take text — e.g. validating a config snippet pasted into the question.</span></label>
       <label class="f" style="margin-bottom:8px">Analyzers
         <span class="tip">mandatory = always called · optional = the AI Controller decides per question</span></label>
       ${ans}
@@ -1939,6 +2034,8 @@ function analyzerCard(tool,a,i){
         <div class="probe-result" data-probe-out="${esc(k)}" style="display:none"></div></div>
       <div><label class="f">discover_url<span class="tip">optional override</span></label>
         <input type="text" data-an="${esc(k)}|discover_url" value="${esc(a.discover_url||"")}" placeholder="(derived)"></div>
+      <div><label class="f">catalog_select<span class="tip">only for a /discover that advertises SEVERAL analyzers (e.g. ORB) — the id of the one this entry means. Empty = match by id, else expand them all.</span></label>
+        <input type="text" data-an="${esc(k)}|catalog_select" value="${esc(a.catalog_select||"")}" placeholder="(not a catalog)"></div>
       <div><label class="f">timeout (s)</label>
         <input type="number" data-an="${esc(k)}|timeout" value="${a.timeout??120}" min="1" max="3600"></div>
     </div></div>`;
@@ -1964,9 +2061,34 @@ async function probeInto(btn){
     }
     const idEl=document.querySelector(`[data-an="${CSS.escape(k)}|id"]`);
     const tEl=document.querySelector(`[data-an="${CSS.escape(k)}|title"]`);
+    const selEl=document.querySelector(`[data-an="${CSS.escape(k)}|catalog_select"]`);
+    out.className="probe-result ok";
+
+    if(d.kind==="catalog"){
+      // One URL advertising SEVERAL analyzers (ORB). Point this entry at one of them; the
+      // operator can add another entry for each of the others.
+      const routes=d.analyzers||[];
+      const want=(selEl?.value||"").trim()||idEl.value.trim();
+      const pick=routes.find(r=>r.analyzer.id===want)||routes[0];
+      if(pick){
+        if(selEl && !selEl.value.trim()) selEl.value=pick.analyzer.id||"";
+        if(!idEl.value.trim()) idEl.value=pick.analyzer.id||"";
+        if(!tEl.value.trim())  tEl.value=pick.analyzer.title||"";
+      }
+      const list=routes.map(r=>`<li><code style="font-family:var(--mono)">${esc(r.analyzer.id)}</code>
+        — ${esc(r.analyzer.title||"")} · <code style="font-family:var(--mono)">${esc(r.query.method)} ${esc(r.query.path)}</code></li>`).join("");
+      out.innerHTML=`✔ <b>catalog</b> — this URL advertises <b>${routes.length}</b> analyzer(s):
+        <ul style="margin:6px 0 0 16px;padding:0">${list}</ul>
+        <span class="wu">This entry is set to
+        <code style="font-family:var(--mono)">catalog_select = ${esc(selEl?.value||"(first)")}</code>.
+        Add another analyzer entry with the same api_url and a different <b>catalog_select</b> to
+        use more of them, or clear catalog_select to expand every route automatically.</span>`;
+      RAW=collectForm()||RAW;
+      return;
+    }
+
     if(!idEl.value.trim()) idEl.value=d.analyzer.id||"";
     if(!tEl.value.trim())  tEl.value=d.analyzer.title||"";
-    out.className="probe-result ok";
     out.innerHTML=`✔ <b>${esc(d.analyzer.title||d.analyzer.id)}</b> answered ·
       <code style="font-family:var(--mono)">${esc(d.query.method)} ${esc(d.query.path)}</code>
       <span class="wu"><b>when_to_use:</b> ${esc(clip(d.analyzer.when_to_use||"(not stated — the AI Controller needs this to route well)",300))}</span>`;
@@ -1978,11 +2100,15 @@ async function probeInto(btn){
 function collectForm(){
   if(rawMode){ try{ return JSON.parse($("#rawEditor").value); }catch(e){ return null; } }
   const out={tools:{}};
+  // Seed each tool from what is ON DISK, not from a fixed skeleton: a field the form doesn't
+  // render (or one added to the config later) must survive a save rather than be silently reset.
+  const blank=()=>({description:"",routing_system_prompt:"",orb_enabled:false,
+                    require_source_url:true,analyzers:[]});
   const known=Object.keys(RAW?.tools||{});
-  known.forEach(n=>out.tools[n]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]});
+  known.forEach(n=>out.tools[n]=Object.assign(blank(),JSON.parse(JSON.stringify(RAW.tools[n]||{}))));
   document.querySelectorAll("[data-tool]").forEach(inp=>{
     const [tn,field]=inp.dataset.tool.split("|");
-    if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
+    if(!out.tools[tn]) out.tools[tn]=blank();
     out.tools[tn][field]=inp.type==="checkbox"?inp.checked:inp.value;
   });
   const byTool={};
@@ -1992,12 +2118,13 @@ function collectForm(){
     byTool[tn][idx][field]=inp.type==="checkbox"?inp.checked:(inp.type==="number"?(+inp.value||0):inp.value);
   });
   Object.entries(byTool).forEach(([tn,rows])=>{
-    if(!out.tools[tn]) out.tools[tn]={description:"",routing_system_prompt:"",orb_enabled:false,analyzers:[]};
+    if(!out.tools[tn]) out.tools[tn]=blank();
     out.tools[tn].analyzers=Object.keys(rows).sort((a,b)=>a-b).map(k=>{
       const src=(RAW.tools?.[tn]?.analyzers||[])[+k]||{};
       const a=rows[k];
       return {id:a.id??src.id??"", title:a.title??src.title??"", api_url:a.api_url??src.api_url??"",
-        discover_url:a.discover_url??src.discover_url??"", mandatory:src.mandatory===true,
+        discover_url:a.discover_url??src.discover_url??"",
+        catalog_select:a.catalog_select??src.catalog_select??"", mandatory:src.mandatory===true,
         enabled:a.enabled!==false, timeout:a.timeout||src.timeout||120};
     });
   });

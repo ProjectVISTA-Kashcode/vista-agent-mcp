@@ -22,8 +22,26 @@ import httpx
 import tlsconf
 import vlog
 
+from . import report as report_mod
 from .models import AnalyzerDiscovery, AnalyzerRef, AnalyzerResult, CallPlan
-from .plan import deterministic as build_plan
+from .plan import decode_text, deterministic as build_plan
+
+
+def _form_value(value) -> str:
+    """Encode one planned field for a multipart/urlencoded body.
+
+    Plan fields are typed (a boolean param really holds ``True``), but a form body carries only
+    text — and ``str(True)`` is ``"True"``, which most APIs do not accept. JSON contracts keep the
+    real type; only this encoding step flattens it.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        import json
+        return json.dumps(value)
+    return str(value)
 
 
 def _err_result(ref: AnalyzerRef, code: str, message: str) -> AnalyzerResult:
@@ -66,10 +84,16 @@ async def call(
     json_body: dict | None = None
     if is_json:
         json_body = dict(plan.fields)
+        # A JSON contract has no multipart part to attach the upload to — it takes the file's
+        # TEXT in a body field, which the planner resolves from the {{file_text}} placeholder.
+        # If the plan named a file_param on a JSON contract, honour it here rather than silently
+        # dropping the file (ORB's config-validate is exactly this shape).
+        if plan.file_param and not str(json_body.get(plan.file_param) or "").strip():
+            json_body[plan.file_param] = decode_text(file_bytes)
     else:
         for name in _file_targets(plan, disc):
             files[name] = (filename or "logfile.log", file_bytes, "application/octet-stream")
-        data = dict(plan.fields)
+        data = {k: _form_value(v) for k, v in plan.fields.items()}
         if not files and not any(
             (p.location == "file" or p.type == "file") for p in disc.query.params
         ):
@@ -109,9 +133,13 @@ async def call(
             detail = resp.text[:160]
         vlog.log(f"  ✖ call[{ref.id}] HTTP {resp.status_code} in {dt}ms: {vlog.short(detail,120)}",
                  vlog.WARNING)
+        # Surface the analyzer's OWN error text, not just the status code. "returned HTTP 400" is
+        # unactionable; "returned HTTP 400: version required" tells the caller what to fix.
+        detail = vlog.short(detail, 200).strip()
         return _err_result(ref, f"http_{resp.status_code}",
                            f"The {ref.title or ref.id} analyzer returned HTTP "
-                           f"{resp.status_code}."), resp.status_code
+                           f"{resp.status_code}" + (f": {detail}" if detail else ".")
+                           ), resp.status_code
 
     try:
         payload = resp.json()
@@ -133,6 +161,26 @@ async def call(
         result.title = ref.title or ref.id
     if not result.analyzer_id:
         result.analyzer_id = ref.id
+
+    # An analyzer is not obliged to send `report_markdown` — ORB's routes return
+    # {reasoning, result, meta} and nothing else. Normalise whatever came back into the one
+    # section the pipeline concatenates, deterministically where possible. Without this such a
+    # result validates fine and contributes an EMPTY section.
+    if not result.report_markdown.strip():
+        md, src = await report_mod.normalize(
+            payload if isinstance(payload, dict) else {},
+            analyzer_id=result.analyzer_id, title=result.title, question=question,
+        )
+        result.report_markdown = md
+        result.meta.setdefault("report_source", src)
+        if md:
+            vlog.log(f"    ↳ [{ref.id}] no report_markdown → rendered {len(md):,} chars ({src})")
+        else:
+            vlog.log(f"    ↳ [{ref.id}] no report_markdown and nothing renderable in the result",
+                     vlog.WARNING)
+    else:
+        result.meta.setdefault("report_source", "native")
+
     vlog.log(f"  ✔ call[{ref.id}] ok in {dt}ms → {len(result.report_markdown):,}-char report "
              f"(supported={result.meta.get('supported')})")
     return result, resp.status_code

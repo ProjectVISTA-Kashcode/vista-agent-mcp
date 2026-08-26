@@ -15,6 +15,9 @@ routes. It serves:
     GET  /gui/api/config            the raw TOOL_ENABLEMENT JSON (for the editor)
     POST /gui/api/config            save it (validated, hot-reloaded, audited to the DB)
     POST /gui/api/probe             fetch an analyzer's /discover so the editor can auto-fill
+                                    (understands BOTH a single analyzer and a catalog)
+    POST /gui/api/ai_build_tool     AI-draft a whole tool entry from a discover URL (never saves)
+    GET  /gui/api/ai_health         live probe of the AI gateway
 
 The flow the GUI draws is DERIVED from the job's events + the tool's config, so it is
 "different for different tools": the analyzer nodes are exactly that tool's analyzers, the AI
@@ -29,14 +32,18 @@ are the only non-read routes; both validate their input.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+import vlog
+
 from . import ai_controller, db
 from . import discovery as discovery_mod
+from .models import AnalyzerCatalog
 from . import jobs as jobs_mod
 from . import orb as orb_mod
 from . import tool_enablement
@@ -239,8 +246,12 @@ async def api_state(request: Request) -> JSONResponse:
         "server": {
             "ai_controller": {
                 "enabled": ai_controller.ENABLED,
-                "url": ai_controller.GEN_URL,
+                "url": ai_controller.BASE_URL,
                 "timeout": ai_controller.TIMEOUT,
+                "runtime": "pydantic-ai",
+                "models": ai_controller.ai_model.TIERS,
+                "reason": ai_controller.ai_model.DISABLED_REASON,
+                "describe": ai_controller.describe(),
             },
             "orb_url": orb_mod.ORB_ASK_URL,
             "time": time.time(),
@@ -315,6 +326,11 @@ async def api_facets(_request: Request) -> JSONResponse:
     return JSONResponse(data)
 
 
+async def api_ai_health(_request: Request) -> JSONResponse:
+    """Live probe of the AI gateway — the console's AI status chip."""
+    return JSONResponse(await ai_controller.health())
+
+
 async def api_config_get(_request: Request) -> JSONResponse:
     return JSONResponse(tool_enablement.raw_json())
 
@@ -339,7 +355,12 @@ async def api_config_post(request: Request) -> JSONResponse:
 
 
 async def api_probe(request: Request) -> JSONResponse:
-    """Fetch an analyzer's ``/discover`` so the editor can validate + auto-fill it."""
+    """Fetch an analyzer's ``/discover`` so the editor can validate + auto-fill it.
+
+    Answers for BOTH discovery shapes. A catalog (one URL advertising several analyzers, as ORB
+    does) comes back as ``kind: "catalog"`` with every route it offers, so the editor can list
+    them and let the operator add one — or all — as separate entries.
+    """
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001
@@ -347,14 +368,143 @@ async def api_probe(request: Request) -> JSONResponse:
     url = str((body or {}).get("url") or "").strip()
     if not url:
         return JSONResponse({"ok": False, "error": "no url given"}, status_code=400)
-    disc, err = await discovery_mod.probe(url)
-    if disc is None:
+    doc, err = await discovery_mod.probe(url)
+    if doc is None:
         return JSONResponse({"ok": False, "error": err})
+
+    if isinstance(doc, AnalyzerCatalog):
+        return JSONResponse({
+            "ok": True,
+            "kind": "catalog",
+            "count": len(doc.analyzers),
+            "analyzers": [{"analyzer": d.analyzer.model_dump(mode="json"),
+                           "query": d.query.model_dump(mode="json"),
+                           "catalog_select": d.analyzer.id} for d in doc.analyzers],
+            "discovery": doc.model_dump(mode="json"),
+        })
+
     return JSONResponse({
         "ok": True,
-        "analyzer": disc.analyzer.model_dump(mode="json"),
-        "query": disc.query.model_dump(mode="json"),
-        "discovery": disc.model_dump(mode="json"),
+        "kind": "analyzer",
+        "analyzer": doc.analyzer.model_dump(mode="json"),
+        "query": doc.query.model_dump(mode="json"),
+        "discovery": doc.model_dump(mode="json"),
+    })
+
+
+async def api_ai_build_tool(request: Request) -> JSONResponse:
+    """**AI: build a tool from a discover URL.** Drafts a config entry; never saves it.
+
+    The operator pastes an analyzer base URL, this probes it, hands the real discovery document
+    to the *pro* model, and returns a complete TOOL_ENABLEMENT entry — name, client-facing
+    description, routing prompt, one analyzer entry per route — for review in the editor. Nothing
+    reaches ``list_tools`` until the operator presses Save, which goes through the normal
+    validated + audited ``POST /gui/api/config`` path.
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    url = str((body or {}).get("url") or "").strip()
+    hint = str((body or {}).get("hint") or "").strip()
+    if not url:
+        return JSONResponse({"ok": False, "error": "no url given"}, status_code=400)
+    if not ai_controller.ENABLED:
+        return JSONResponse({"ok": False, "error":
+                             f"the AI Controller is off ({ai_controller.ai_model.DISABLED_REASON})"})
+
+    doc, err = await discovery_mod.probe(url)
+    if doc is None:
+        return JSONResponse({"ok": False, "error": f"discovery failed — {err}"})
+
+    is_cat = isinstance(doc, AnalyzerCatalog)
+    doc_json = json.dumps(doc.model_dump(mode="json"), indent=2)[:60000]
+    known = ", ".join(sorted(tool_enablement.load().keys())) or "(none)"
+    kind = ("CATALOG - several analyzers under one /discover" if is_cat
+            else "single analyzer")
+    lines = [
+        f"DISCOVERY URL: {url}",
+        f"DOCUMENT KIND: {kind}",
+    ]
+    if hint:
+        lines.append(f"OPERATOR HINT: {hint}")
+    lines += [
+        "",
+        "DISCOVERY DOCUMENT:",
+        doc_json,
+        "",
+        f"Existing tool names (do not collide): {known}",
+    ]
+    prompt = "\n".join(lines)
+    draft, ms, note = await ai_controller.draft_tool(prompt)
+    if draft is None:
+        return JSONResponse({"ok": False, "error": f"the AI could not draft this tool ({note})"})
+
+    # Validate the draft against the discovery it was drafted FROM — the same principle as
+    # orchestrator.plan.from_ai: the model proposes, the document disposes. A draft that looks
+    # plausible but points at a URL that doesn't resolve would otherwise be saved and then fail
+    # silently at the next tool call.
+    routes = ({d.analyzer.id: d for d in doc.analyzers} if is_cat
+              else {doc.analyzer.id: doc})
+    fixes: list[str] = []
+    analyzers_json: list[dict] = []
+    for a in draft.analyzers:
+        sel = (a.catalog_select or "").strip()
+        if is_cat:
+            if sel not in routes:
+                # Fall back to matching on the entry's own id before giving up on it.
+                if a.id in routes:
+                    fixes.append(f'"{a.id}": catalog_select "{sel or "(empty)"}" → "{a.id}"')
+                    sel = a.id
+                else:
+                    fixes.append(f'dropped "{a.id}": no route "{sel or "(empty)"}" in the catalog')
+                    continue
+        elif sel:
+            fixes.append(f'"{a.id}": catalog_select "{sel}" cleared (not a catalog)')
+            sel = ""
+
+        disc = routes.get(sel or a.id)
+        api_url = (a.api_url or "").strip() or url
+        # ``discover_url`` is an OVERRIDE fetched verbatim. An override that isn't a /discover
+        # endpoint is worse than none, so normalise it or drop it back to derived.
+        dsc = (a.discover_url or "").strip()
+        if dsc and not dsc.rstrip("/").endswith("/discover"):
+            if dsc.rstrip("/") == api_url.rstrip("/"):
+                fixes.append(f'"{a.id}": discover_url cleared (derived from api_url instead)')
+                dsc = ""
+            else:
+                dsc = dsc.rstrip("/") + "/discover"
+                fixes.append(f'"{a.id}": discover_url → {dsc}')
+
+        title = (a.title or "").strip()
+        if not title and disc is not None:
+            title = disc.analyzer.title or ""
+
+        analyzers_json.append({
+            "id": a.id, "title": title, "api_url": api_url,
+            "discover_url": dsc, "catalog_select": sel,
+            "mandatory": bool(a.mandatory), "enabled": bool(a.enabled),
+            "timeout": float(a.timeout or 120),
+        })
+
+    if not analyzers_json:
+        return JSONResponse({"ok": False, "error":
+                             "the draft named no analyzer that this URL actually advertises"})
+    if fixes:
+        vlog.log("  ⚠ [ai:draft] corrections: " + "; ".join(fixes), vlog.WARNING)
+
+    tool_json = {
+        "description": draft.description,
+        "routing_system_prompt": draft.routing_system_prompt,
+        "orb_enabled": bool(draft.orb_enabled),
+        "require_source_url": bool(draft.require_source_url),
+        "analyzers": analyzers_json,
+    }
+    return JSONResponse({
+        "ok": True, "tool_name": draft.tool_name, "tool": tool_json,
+        "reason": draft.reason, "kind": "catalog" if is_cat else "analyzer",
+        "fixes": fixes, "elapsed_ms": ms, "note": note,
+        "exists": draft.tool_name in tool_enablement.load(),
     })
 
 
@@ -380,3 +530,5 @@ def register(mcp) -> None:
         mcp.custom_route(pfx + "/api/config", methods=["GET"])(api_config_get)
         mcp.custom_route(pfx + "/api/config", methods=["POST"])(api_config_post)
         mcp.custom_route(pfx + "/api/probe", methods=["POST"])(api_probe)
+        mcp.custom_route(pfx + "/api/ai_build_tool", methods=["POST"])(api_ai_build_tool)
+        mcp.custom_route(pfx + "/api/ai_health", methods=["GET"])(api_ai_health)

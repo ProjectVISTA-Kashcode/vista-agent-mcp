@@ -42,10 +42,15 @@ Config (env; a .env file is auto-loaded if python-dotenv is installed):
                              default http://127.0.0.1:8802/logVisualizer/api/agent_assist
     LOGV_VIEW_BASE           SPA base for the returned session links/iframe
                              default https://vista.fortinet.com/logVisualizer
-    AI_CONTROLLER_ENABLED    '0' disables the AI Controller (deterministic routing + calls
-                             built straight from each analyzer's discovery). Default on.
-    AI_CONTROLLER_GEN_URL    AI gateway used for the routing/invocation decision
-    AI_CONTROLLER_TIMEOUT    gateway read timeout, seconds (default 60)
+    AI_CONTROLLER_ENABLED    '0' disables every AI step (deterministic routing + calls built
+                             straight from each analyzer's discovery). Default on.
+    AGENTASSIST_BASE_URL     OpenAI-compatible gateway the Pydantic AI agents run against
+                             (default https://agentassist.corp.fortinet.com/v1)
+    AGENTASSIST_API_KEY      bearer key for that gateway — REQUIRED for any AI step to run
+    AI_MODEL_FAST/PRO/LONG   model ids per tier (default model-fast / model-pro / model-long)
+    AI_TIMEOUT               per-request timeout, seconds (default 60)
+    AI_REPORT_RENDER         auto (default) | 1 | 0 — AI rendering of analyzer results that
+                             carry no report_markdown of their own
     DATABASE_URL             Postgres for durable job history + GUI analytics, e.g.
                              postgresql+psycopg://user:pass@host:5432/usage_logs
                              (unset ⇒ history off; the server runs exactly as before)
@@ -97,7 +102,10 @@ LOGV_API_BASE = os.getenv(
     "LOGV_API_BASE", "https://vista.fortinet.com/logVisualizer/api/agent_assist"
 )
 LOGV_VIEW_BASE = os.getenv("LOGV_VIEW_BASE", "https://vista.fortinet.com/logVisualizer")
-ALLOWED_EXT = {"log", "txt", "csv", "gz"}
+# Extensions we pass through on the derived filename so the backend can sniff the format.
+# `conf`/`cfg` matter now that tools take FortiGate CONFIGURATION files, not only logs — without
+# them a .conf was renamed to "logfile.log" and analyzers echoed that wrong name into the report.
+ALLOWED_EXT = {"log", "txt", "csv", "gz", "conf", "cfg"}
 
 # ORB troubleshooting API — after the LogV analyzer gets the analysis, it asks ORB for
 # remediation steps relevant to it and folds them into the report (fail-open). Disable with
@@ -235,7 +243,7 @@ async def fetch_log(source_url: str) -> tuple[bytes, str]:
     name = os.path.basename(urlparse(source_url).path) or "logfile.log"
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if ext not in ALLOWED_EXT:
-        vlog.log("fetch: URL had no known log extension → using filename 'logfile.log'")
+        vlog.log("fetch: URL had no known log/config extension → using filename 'logfile.log'")
         name = "logfile.log"
     vlog.log(f"fetch: done — {len(raw):,} bytes, filename='{name}' in {time.time()-t0:.2f}s")
     return raw, name
@@ -261,14 +269,29 @@ async def _run_tool(tool_name: str, source_url: str, question: str) -> str:
 
     Shared by every dynamically-registered tool — the tool's identity is just the ``tool_name``
     passed to the pipeline, which loads that tool's analyzers/routing/ORB from config.
+
+    A tool configured with ``require_source_url: false`` may be called with no file at all: its
+    analyzers take text parameters (ORB's config-validate wants a config snippet and a FortiOS
+    version), and the AI Controller sources those from the question. The pipeline then runs
+    exactly as usual with zero bytes.
     """
     rid = vlog.new_rid()
     t0 = time.time()
     vlog.log("═" * 72)
     vlog.log(
         f"▶ TOOL CALL  {tool_name}  question={vlog.short(question, 160)!r}  "
-        f"source_url={vlog.redact_url(source_url)}"
+        f"source_url={vlog.redact_url(source_url) if source_url else '(none — text-input tool)'}"
     )
+    if not (source_url or "").strip():
+        try:
+            report = await pipeline.run(tool_name=tool_name, file_bytes=b"", filename="",
+                                        question=question, job_id=rid)
+        except Exception as e:  # noqa: BLE001
+            vlog.log(f"✖ pipeline failed: {type(e).__name__}: {e}", vlog.ERROR)
+            report = "⚠️ The analysis pipeline encountered an internal error."
+        vlog.log(f"◀ TOOL CALL done — returning {len(report):,}-char report in {time.time()-t0:.2f}s")
+        return report
+
     # --- fetch (leak-safe error handling: never echo the signed URL or a raw stack) ---
     try:
         log_bytes, filename = await fetch_log(source_url)
@@ -317,24 +340,44 @@ async def _run_tool(tool_name: str, source_url: str, question: str) -> str:
     return report
 
 
-def _make_tool_fn(tool_name: str):
-    """Build a typed MCP tool function bound to ``tool_name`` (all tools share this shape)."""
-    async def tool_fn(
-        source_url: Annotated[str, Field(description=(
-            "Signed URL to the uploaded FortiOS/FortiGate log. THE PLATFORM INJECTS THIS "
-            "automatically — the model must not fill or invent it."))],
-        question: Annotated[str, Field(description=(
-            "The user's natural-language question about the log (optional — omit for a general "
-            "analysis + visualization)."))] = "",
-    ) -> str:
-        return await _run_tool(tool_name, source_url, question)
+def _make_tool_fn(tool_name: str, require_source_url: bool = True):
+    """Build a typed MCP tool function bound to ``tool_name``.
+
+    Two shapes, chosen by the tool's config. The default is the one every VISTA tool has always
+    had — a REQUIRED platform-injected ``source_url`` plus an optional ``question``. A tool whose
+    analyzers take text rather than a file (``require_source_url: false``) gets ``source_url`` as
+    an OPTIONAL field instead, so a caller can pass just a question.
+    """
+    if require_source_url:
+        async def tool_fn(
+            source_url: Annotated[str, Field(description=(
+                "Signed URL to the uploaded file this tool analyzes (a FortiOS/FortiGate log or "
+                "configuration). THE PLATFORM INJECTS THIS automatically — the model must not "
+                "fill or invent it."))],
+            question: Annotated[str, Field(description=(
+                "The user's natural-language question about the uploaded file (optional — omit "
+                "for a general analysis)."))] = "",
+        ) -> str:
+            return await _run_tool(tool_name, source_url, question)
+    else:
+        async def tool_fn(  # type: ignore[misc]
+            question: Annotated[str, Field(description=(
+                "The user's natural-language request, including any inline configuration or "
+                "text to work on, and any FortiOS version it concerns."))] = "",
+            source_url: Annotated[str, Field(description=(
+                "OPTIONAL. Signed URL to an uploaded file, if the platform supplies one. THE "
+                "PLATFORM INJECTS THIS — the model must not fill or invent it. Omit it entirely "
+                "when the request carries its own text."))] = "",
+        ) -> str:
+            return await _run_tool(tool_name, source_url, question)
 
     tool_fn.__name__ = re.sub(r"\W", "_", tool_name).lower() or "vista_tool"
     return tool_fn
 
 
-# name -> currently-registered description, so sync can add / remove / refresh tools live.
-_REGISTERED: dict[str, str] = {}
+# name -> the (description, require_source_url) it is currently registered with, so sync can
+# add / remove / refresh tools live when either one changes.
+_REGISTERED: dict[str, tuple[str, bool]] = {}
 
 
 def _desc_for(tool_name: str, tc) -> str:
@@ -352,19 +395,23 @@ def sync_tools(cfg: dict | None = None) -> None:
     pipeline reads them from config per call.)
     """
     cfg = cfg if cfg is not None else tool_enablement.load()
-    desired = {name: _desc_for(name, tc) for name, tc in cfg.items()}
+    desired = {name: (_desc_for(name, tc), bool(tc.require_source_url))
+               for name, tc in cfg.items()}
 
-    for name, desc in desired.items():
-        if _REGISTERED.get(name) == desc:
+    for name, sig in desired.items():
+        if _REGISTERED.get(name) == sig:
             continue
-        if name in _REGISTERED:                       # description changed → refresh
+        if name in _REGISTERED:                       # description or input shape changed → refresh
             try:
                 mcp.remove_tool(name)
             except Exception:  # noqa: BLE001
                 pass
-        mcp.add_tool(Tool.from_function(_make_tool_fn(name), name=name, description=desc))
-        _REGISTERED[name] = desc
-        vlog.log(f"  ⊕ tool registered: {name}")
+        desc, needs_file = sig
+        mcp.add_tool(Tool.from_function(_make_tool_fn(name, needs_file), name=name,
+                                        description=desc))
+        _REGISTERED[name] = sig
+        vlog.log(f"  ⊕ tool registered: {name}"
+                 + ("" if needs_file else "  (source_url optional — text-input tool)"))
 
     for name in list(_REGISTERED):                    # dropped from config → unregister
         if name not in desired:
@@ -397,15 +444,16 @@ if __name__ == "__main__":
     _all = tool_enablement.load()
     vlog.log(f"  tools ({len(_all)})       : {', '.join(_all) or '(none)'}   [config-driven; add/edit via GUI]")
     for _name, _cfg in _all.items():
-        vlog.log(f"  • {_name}:")
+        vlog.log(f"  • {_name}"
+                 + ("" if _cfg.require_source_url else "   [source_url OPTIONAL — text input]") + ":")
         for _a in _cfg.analyzers:
-            vlog.log(f"      - {_a.id:<6} {'[mandatory]' if _a.mandatory else '[optional] '} "
-                     f"{'' if _a.enabled else '(disabled) '}→ {_a.api_url}")
+            _sel = f"  (catalog → {_a.catalog_select})" if _a.catalog_select else ""
+            vlog.log(f"      - {_a.id:<16} {'[mandatory]' if _a.mandatory else '[optional] '} "
+                     f"{'' if _a.enabled else '(disabled) '}→ {_a.api_url}{_sel}")
         vlog.log(f"      ORB: {'ON' if _cfg.orb_enabled else 'OFF'}"
                  f"  ·  routing prompt: {'custom' if _cfg.routing_system_prompt.strip() else 'default'}")
     _dbs = db.status()
-    vlog.log(f"  AI Controller    : {'ON → ' + ai_controller.GEN_URL if ai_controller.ENABLED else 'OFF (deterministic routing + discovery-built calls)'}"
-             + (f"  (timeout {ai_controller.TIMEOUT:.0f}s)" if ai_controller.ENABLED else ""))
+    vlog.log(f"  AI Controller    : {ai_controller.describe()}")
     vlog.log(f"  job history (DB) : "
              + (f"ON → {_dbs['url']}" if _dbs["connected"] else
                 ("OFF — " + (_dbs["last_error"] or "no DATABASE_URL / disabled"))))

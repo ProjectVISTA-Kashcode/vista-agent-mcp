@@ -40,11 +40,27 @@ Under the tool's `analyzers` array:
   "title": "Performance Analyzer",
   "api_url": "https://vista.fortinet.com/perf",   // your analyzer's base URL
   "discover_url": "",                 // empty ⇒ derived as api_url + "/discover"
+  "catalog_select": "",               // only for a CATALOG /discover — see below
   "mandatory": false,                 // false ⇒ the AI Controller decides; true ⇒ always called
   "enabled": true,                    // false ⇒ ignored entirely
   "timeout": 120
 }
 ```
+
+**If the URL advertises several analyzers (a catalog).** Some services publish their whole surface
+from one `/discover` and have no per-route discovery — ORB is the example
+(`https://vista.fortinet.com/orb/discover` offers `config-extract` and `config-validate`). Point
+`api_url` at the **catalog** and use `catalog_select` to say which route this entry means:
+
+```jsonc
+{ "id": "config-validate", "api_url": "https://vista.fortinet.com/orb",
+  "catalog_select": "config-validate", "mandatory": true, "enabled": true, "timeout": 180 }
+```
+
+Leave `catalog_select` empty to expand **every** route in the catalog into its own runtime
+analyzer (`<entry id>:<route id>`), all inheriting this entry's mandatory/enabled/timeout. Press
+**🔌 Test & autofill** on a catalog URL and the console lists the routes it offers and fills
+`catalog_select` in for you.
 
 - **`mandatory: true`** — always called for this tool (e.g. LogV's own analysis).
 - **`mandatory: false`** — called only when this tool's AI Controller routing selects it, based
@@ -57,6 +73,17 @@ Edit that tool's **`routing_system_prompt`** to mention when the new companion i
 is the per-tool guidance; keep it about *routing* (the fixed JSON output format is added
 automatically). Example addition: *"…for questions about interface throughput or bandwidth
 saturation, add the performance analyzer."*
+
+### 1c-bis. If your tool takes text instead of a file
+
+Every VISTA tool has historically required the platform-injected `source_url`. A tool whose
+analyzers work on *text* — validating a config snippet the user pasted into their question, say —
+sets `"require_source_url": false` on the **tool** (not the analyzer). Its MCP input schema then
+has `source_url` as an optional field, and the tool can be called with `question` alone. In the
+console this is the **"requires an uploaded file"** switch on the tool.
+
+When a file *is* present, a JSON-contract analyzer still gets it: declare a body param for the
+content and the AI Controller plans `{{file_text}}` into it.
 
 ### 1d. Apply it
 - **Via the GUI (easiest):** open `http://<host>:<port>/gui` → **Add / Edit Tools** → under the
@@ -79,7 +106,20 @@ registers one generic function per configured tool and re-syncs the live tool se
 config changes. **Adding a tool is a config edit — the new MCP tool (name + endpoints) appears
 immediately, with no code and no restart.**
 
-### The one supported way: the GUI
+### The fastest way: ✨ Build with AI
+Open `/gui` → **Add / Edit Tools** → **✨ Build with AI**, paste the analyzer's base URL, and add
+an optional hint ("expose only the validation route", "this one should be mandatory"). The server
+fetches the `/discover` — single analyzer or catalog — and the **pro** model drafts the whole
+entry: tool name, client-facing description, routing prompt, ORB toggle, `require_source_url`, and
+one analyzer entry per route. The draft is validated against the discovery it came from (a
+`catalog_select` that names no real route is dropped; a `discover_url` that isn't a discovery
+endpoint is fixed) and any corrections are shown.
+
+**It is a draft.** It lands in the editor for you to review and change, and reaches `list_tools`
+only when you press **Save & reload**. Treat the generated *description* as the thing most worth
+editing — it is the entire basis a calling agent has for choosing your tool.
+
+### The manual way: the GUI wizard
 Open `/gui` (or `/mcp/gui`) → **Add / Edit Tools** → **+ add tool**:
 1. Give it a name (this is the `list_tools` name, e.g. `Config_Generator`).
 2. Fill its **description** (what clients read), its **routing system prompt** (its AI Controller
@@ -114,6 +154,8 @@ config at startup and on every save.
 ## 3. Checklist
 
 - [ ] Analyzer implements `GET /discover` + `POST <query.path>` per [`analyzer_api.md`](analyzer_api.md)
+- [ ] if its `/discover` is a **catalog**, each config entry sets `catalog_select`
+- [ ] a text-input tool sets `"require_source_url": false`
 - [ ] `when_to_use` is written as a precise routing rule
 - [ ] every param is declared, with a `description`; every **required** param has a `default`
 - [ ] **🔌 Test & autofill** in the GUI returns green for the analyzer's base URL

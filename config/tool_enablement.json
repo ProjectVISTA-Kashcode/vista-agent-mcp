@@ -4,49 +4,71 @@
       "description": "Analyze and visualize a FortiOS/FortiGate (or FortiAnalyzer) log file. The platform supplies the log automatically via the injected `source_url` field \u2014 you do NOT ask the user for the file and you do NOT fill `source_url`. Pass the user's natural-language question in `question` (optional). Returns one text report: the log analysis and an interactive dashboard link, plus troubleshooting suggestions and any relevant companion analyses. It auto-detects the log's event type and routes internally.",
       "routing_system_prompt": "You are the analyzer router for the FortiGate Log Analyzer & Visualizer tool. This tool always analyzes and visualizes the uploaded FortiOS/FortiGate log; the log analysis itself is mandatory and already included, so you never decide on it. Your ONLY job is to decide which OPTIONAL companion analyzers add value for THIS user question, given each analyzer's stated purpose. Add a companion analyzer only when the question clearly calls for its specialty (e.g. CPU/memory/conserve-mode pressure \u2192 the performance analyzer; hardware end-of-support / lifecycle dates \u2192 the EoS lookup). If the question is a general log/SLA/traffic/event question with no such specialty, add nothing and let the log analysis stand on its own. Prefer precision over breadth \u2014 do not add an analyzer just because it exists.",
       "orb_enabled": true,
+      "require_source_url": true,
       "analyzers": [
         {
           "id": "logv",
           "title": "Log Analyzer & Visualizer",
           "api_url": "https://vista.fortinet.com/logVisualizer/api/agent_assist",
           "discover_url": "",
+          "catalog_select": "",
           "mandatory": true,
           "enabled": true,
           "timeout": 300
-        },
-        {
-          "id": "perf",
-          "title": "Performance Analyzer",
-          "api_url": "http://127.0.0.1:8811/perf",
-          "discover_url": "",
-          "mandatory": false,
-          "enabled": true,
-          "timeout": 120
         }
       ]
     },
-    "perf_analyzer": {
-      "description": "Analyze and visualize a FortiOS/FortiGate (or FortiAnalyzer) log file. The platform supplies the log automatically via the injected `source_url` field \u2014 you do NOT ask the user for the file and you do NOT fill `source_url`. Pass the user's natural-language question in `question` (optional). Returns one text report: the log analysis and an interactive dashboard link, plus troubleshooting suggestions and any relevant companion analyses. It auto-detects the log's event type and routes internally.",
-      "routing_system_prompt": "You are the analyzer router for the FortiGate Log Analyzer & Visualizer tool. This tool always analyzes and visualizes the uploaded FortiOS/FortiGate log; the log analysis itself is mandatory and already included, so you never decide on it. Your ONLY job is to decide which OPTIONAL companion analyzers add value for THIS user question, given each analyzer's stated purpose. Add a companion analyzer only when the question clearly calls for its specialty (e.g. CPU/memory/conserve-mode pressure \u2192 the performance analyzer; hardware end-of-support / lifecycle dates \u2192 the EoS lookup). If the question is a general log/SLA/traffic/event question with no such specialty, add nothing and let the log analysis stand on its own. Prefer precision over breadth \u2014 do not add an analyzer just because it exists.",
+    "FortiGate_Config_Extractor": {
+      "description": "Given an uploaded FortiGate/FortiOS configuration file (.conf), return the CLI configuration sections of THAT config that are relevant to the user's topic \u2014 verbatim, lifted from their own file. Use this when the user asks what is in their config, or to show the parts of their config that affect a feature (e.g. \"show my SD-WAN and BGP config\", \"what in this config affects IPsec?\"). The platform supplies the config file automatically via the injected `source_url` \u2014 do NOT ask for the file and do NOT fill `source_url`. Put the topic to scope on in `question`. This tool does NOT author new configuration and does NOT check whether commands are valid on a FortiOS version \u2014 use the config validation tool for that.",
+      "routing_system_prompt": "You are the analyzer router for the FortiGate Config Extractor tool. This tool always runs the config-extract analyzer against the uploaded FortiOS configuration file, so you never decide whether to run it \u2014 you only plan how to call it. The analyzer needs the uploaded file and a natural-language question that scopes which configuration sections to return; pass the user's question through as that scope. If the user gave no explicit topic, ask for a general overview of the notable configured features rather than sending an empty scope.",
       "orb_enabled": false,
+      "require_source_url": true,
       "analyzers": [
         {
-          "id": "new_analyzer1",
-          "title": "",
-          "api_url": "http://127.0.0.1:PORT/base",
+          "id": "config-extract",
+          "title": "FortiGate Config Extraction",
+          "api_url": "https://vista.fortinet.com/orb",
           "discover_url": "",
+          "catalog_select": "config-extract",
           "mandatory": true,
           "enabled": true,
-          "timeout": 120
-        },
+          "timeout": 180
+        }
+      ]
+    },
+    "FortiGate_Config_Validator": {
+      "description": "Check whether FortiOS CLI commands and options actually exist on a given FortiOS version, using the FortiOS CLI Reference. Use this when the user has a configuration snippet (their own, or one that was just authored for them) and asks whether it is valid, will apply, or is supported on a specific version \u2014 e.g. \"is this valid on 7.4.11?\", \"does this option exist in 7.2?\". Put the configuration text and the FortiOS version in `question`; if the platform has a config file it is used automatically via `source_url`, but no file is required. Reports which command paths and set-lines exist versus are not found, and whether the config blocks are balanced. Advisory only \u2014 a \"not found\" can be a false negative. It does NOT extract sections from an uploaded config.",
+      "routing_system_prompt": "You are the analyzer router for the FortiGate Config Validator tool. This tool always runs the config-validate analyzer, so you never decide whether to run it \u2014 you only plan how to call it, and getting the parameters right is the entire job. The analyzer requires TWO values and fails outright without them: the configuration text to check, and a FortiOS version. Take the configuration text from the uploaded file when one is present ({{file_text}}), otherwise from the configuration the user included in their question. Take the version from whatever the user stated (\"7.4.11\", \"7.2\", \"on 7.6\"); if they named no version at all, choose the current mainstream FortiOS release rather than sending an empty value, and say so in your note.",
+      "orb_enabled": false,
+      "require_source_url": false,
+      "analyzers": [
         {
-          "id": "new_analyzer2",
-          "title": "",
-          "api_url": "http://127.0.0.1:PORT/base",
+          "id": "config-validate",
+          "title": "FortiGate Config Validation",
+          "api_url": "https://vista.fortinet.com/orb",
           "discover_url": "",
-          "mandatory": false,
+          "catalog_select": "config-validate",
+          "mandatory": true,
           "enabled": true,
-          "timeout": 120
+          "timeout": 180
+        }
+      ]
+    },
+    "log_v_internal_only": {
+      "description": "You are the analyzer router for this tool. Its mandatory analyzer always runs, so decide only which OPTIONAL companion analyzers add value for THIS user question, using each analyzer's stated purpose. Add one only when the question clearly calls for its specialty; prefer precision over breadth.",
+      "routing_system_prompt": "You are the analyzer router for this tool. Its mandatory analyzer always runs, so decide only which OPTIONAL companion analyzers add value for THIS user question, using each analyzer's stated purpose. Add one only when the question clearly calls for its specialty; prefer precision over breadth.",
+      "orb_enabled": false,
+      "require_source_url": true,
+      "analyzers": [
+        {
+          "id": "log_analyzer_visualizer",
+          "title": "Log Analyzer & Visualizer",
+          "api_url": "https://vista.fortinet.com/logVisualizer/api/agent_assist",
+          "discover_url": "",
+          "catalog_select": "",
+          "mandatory": true,
+          "enabled": true,
+          "timeout": 300
         }
       ]
     }

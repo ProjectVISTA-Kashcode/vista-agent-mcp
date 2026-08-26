@@ -15,6 +15,7 @@ Two families of models:
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Literal
 
@@ -29,14 +30,57 @@ SCHEMA_VERSION = "1.0"
 class AnalyzerParam(BaseModel):
     name: str
     required: bool = False
-    type: str = "string"          # string | file
-    location: str = "form"        # form | file
+    type: str = "string"          # string | file | boolean | integer | number | object | array
+    location: str = "form"        # form | file | body | query
     description: str = ""
     # Optional (additive, v1.0-compatible). If an analyzer adds a REQUIRED param, advertising a
     # default here keeps even the no-AI fallback path correct: the deterministic builder sends
     # this value, and the AI Controller may override it when the question calls for something
     # else. Analyzers that omit it rely on the AI Controller to choose a value.
-    default: str = ""
+    #
+    # NOT typed `str`: a JSON-contract analyzer advertises defaults in their real JSON type —
+    # ORB's config-validate declares `"default": true` for its boolean `check_lines`. Typing this
+    # `str` made the whole analyzer fail validation and get silently dropped from its catalog.
+    default: Any = ""
+
+    def is_file(self) -> bool:
+        return self.location == "file" or self.type == "file"
+
+    def coerce(self, value: Any) -> Any:
+        """Cast a (possibly string) value to this param's DECLARED type.
+
+        The AI Controller emits every planned field value as a string — that is deliberate: a
+        free-form JSON value is the one part of a structured response models get wrong most
+        often. The declared type is already in the discovery, so the conversion is done here,
+        deterministically, instead of being trusted to the model. A value that doesn't parse is
+        passed through untouched rather than guessed at.
+        """
+        t = (self.type or "string").strip().lower()
+        if t in ("string", "file", "") or not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if t == "boolean":
+            if raw.lower() in ("true", "1", "yes", "on"):
+                return True
+            if raw.lower() in ("false", "0", "no", "off"):
+                return False
+            return value
+        if t == "integer":
+            try:
+                return int(raw)
+            except ValueError:
+                return value
+        if t == "number":
+            try:
+                return float(raw)
+            except ValueError:
+                return value
+        if t in ("object", "array"):
+            try:
+                return json.loads(raw)
+            except Exception:  # noqa: BLE001
+                return value
+        return value
 
 
 class AnalyzerQuery(BaseModel):
@@ -67,6 +111,21 @@ class AnalyzerDiscovery(BaseModel):
     base_url: str = ""
     analyzer: AnalyzerInfo
     query: AnalyzerQuery
+
+
+class AnalyzerCatalog(BaseModel):
+    """A **catalog** discovery document: one URL advertising SEVERAL analyzers at once.
+
+    ORB does this — ``GET https://vista.fortinet.com/orb/discover`` returns
+    ``{"schema_version": "1.0", "analyzers": [<AnalyzerDiscovery>, <AnalyzerDiscovery>]}`` and the
+    individual routes have **no** ``/discover`` of their own (they 404). So a service can publish
+    its whole surface from one endpoint, and one config entry can address any analyzer in it —
+    see :meth:`AnalyzerRef.catalog_select` and :func:`orchestrator.discovery.discover`.
+    """
+
+    model_config = {"extra": "allow"}
+    schema_version: str = SCHEMA_VERSION
+    analyzers: list[AnalyzerDiscovery] = Field(default_factory=list)
 
 
 class AnalyzerArtifacts(BaseModel):
@@ -104,8 +163,26 @@ class AnalyzerRef(BaseModel):
     enabled: bool = True
     timeout: float = 300.0
 
+    # --- catalog support (a /discover that advertises SEVERAL analyzers; see AnalyzerCatalog) ---
+    # Which analyzer inside the catalog this entry means:
+    #   "<id>"  → use exactly that one       (ORB: api_url=…/orb, catalog_select="config-validate")
+    #   ""      → if the catalog contains an analyzer whose own id equals THIS ref's id, use it;
+    #             otherwise EXPAND — every analyzer in the catalog becomes a runtime analyzer
+    #             called "<ref.id>:<sub id>", inheriting this entry's mandatory/enabled/timeout.
+    # A single-analyzer /discover ignores this field entirely.
+    catalog_select: str = ""
+
     def resolved_discover_url(self) -> str:
         return self.discover_url or (self.api_url.rstrip("/") + "/discover")
+
+    def child(self, sub_id: str, disc: "AnalyzerDiscovery") -> "AnalyzerRef":
+        """A runtime ref for one analyzer expanded out of a catalog under this entry."""
+        return AnalyzerRef(
+            id=sub_id, title=disc.analyzer.title or sub_id,
+            api_url=disc.base_url or self.api_url, discover_url=self.resolved_discover_url(),
+            mandatory=self.mandatory, enabled=self.enabled, timeout=self.timeout,
+            catalog_select=disc.analyzer.id,
+        )
 
 
 class ToolConfig(BaseModel):
@@ -122,6 +199,14 @@ class ToolConfig(BaseModel):
     routing_system_prompt: str = ""               # per-tool AI Controller routing prompt section
     orb_enabled: bool = True
     analyzers: list[AnalyzerRef] = Field(default_factory=list)
+
+    # Does this tool's MCP surface REQUIRE the platform-injected file?
+    #   True  (default) → `source_url` is a required input; behaviour is exactly as it always was.
+    #   False           → `source_url` is optional. For analyzers that take TEXT rather than a
+    #                     file (ORB's config-validate wants `config_snippet` + `version`), the
+    #                     caller may pass only `question`. The pipeline then runs with zero
+    #                     bytes and the AI Controller sources values from the question alone.
+    require_source_url: bool = True
 
     def mandatory(self) -> list[AnalyzerRef]:
         return [a for a in self.analyzers if a.enabled and a.mandatory]
@@ -151,7 +236,9 @@ class CallPlan(BaseModel):
     url: str = ""
     content_type: str = "multipart/form-data"
     file_param: str = ""                          # param that carries the file ("" = no file)
-    fields: dict[str, str] = Field(default_factory=dict)   # form/JSON fields (placeholders resolved)
+    # form/JSON fields, placeholders resolved and cast to each param's DECLARED type — so a JSON
+    # contract receives a real `true`, not the string "true" (see AnalyzerParam.coerce).
+    fields: dict[str, Any] = Field(default_factory=dict)
     source: str = "deterministic"                 # ai | ai-corrected | deterministic
     notes: list[str] = Field(default_factory=list)         # what validation changed, and why
     ai_note: str = ""                             # the AI Controller's own note for this call
